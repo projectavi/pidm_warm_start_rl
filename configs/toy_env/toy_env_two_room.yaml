@@ -1,0 +1,77 @@
+seed: 42
+layout: |
+  WWWWWWWWWWWWWWWWWWWWWWW
+  W                     W
+  W G                 G W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W          A          W
+  WWWWWWWWWW   WWWWWWWWWW
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W                     W
+  W G                 G W
+  W                     W
+  WWWWWWWWWWWWWWWWWWWWWWW
+room_size: [800, 800]
+observation:
+  observation_type: feature_state
+  observe_goals: true
+  positions_relative_to_agent: false
+  img_obs_size: [224, 224]
+  exogenous_noise:
+    add_noise: false
+    feature_vector_noise_dim: 0
+    feature_vector_noise_mean: 0.0
+    feature_vector_noise_std: 1.0
+    feature_vector_random_walk_noise_mean: 0.0
+    feature_vector_random_walk_noise_std: 0.3
+    image_noise_max: 256
+    image_noise_min: 200
+    image_random_walk_noise_max: 16
+    image_random_walk_noise_min: -16
+    noise_type: iid
+state:
+  positions_relative_to_agent: false
+  exogenous_noise:
+    add_noise: false
+    feature_vector_noise_dim: 0
+    feature_vector_noise_mean: 0.0
+    feature_vector_noise_std: 1.0
+    feature_vector_random_walk_noise_mean: 0.0
+    feature_vector_random_walk_noise_std: 0.3
+    image_noise_max: 256
+    image_noise_min: 200
+    image_random_walk_noise_max: 16
+    image_random_walk_noise_min: -16
+    noise_type: iid
+action:
+  control_deadzone: 0.1
+  velocity_scale: [20.0, 20.0]
+  add_transition_noise: false
+  transition_gaussian_noise_mean: [0.0, 0.0]
+  transition_gaussian_noise_std: [0.5, 0.5]
+rendering:
+  goal_size: 20
+  agent_size: 20
+  render_player_trace: true
+  trace_size: 1
+  max_trace_length: -1
+max_steps: 500
+goal:
+  termination_condition: all_goals
+  reward_per_reached_goal: 1.0
+  num_goals: 1
+  randomisation:
+    randomise_agent_spawn: false
+    randomise_goal_positions: false

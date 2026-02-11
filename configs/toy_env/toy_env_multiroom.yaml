@@ -1,0 +1,78 @@
+seed: 42
+layout: |+
+  WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW
+  W      W       WWWWW                     W
+  W G    W       WWWWW   G                 W
+  W    WWW       WWWWW                     W
+  W          W   WWWWW                     W
+  W          W   W   WWWWWWWWWWWWWW   WWWWWW
+  W          W   W G W                     W
+  WWWW   WWWWW                             W
+  W          W                             W
+  W    A     WWWWW   WWWWWWWW   WWWWWWWW   W
+  W          W          WWWWW   WWWWWWWW   W
+  WWWW   WWWWW          WWWWW   WWWWWWWW   W
+  W          W          WWWWW         WW   W
+  W    G                WWWWW       G WW G W
+  W          W          WWWWW         WW   W
+  WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW
+
+room_size: [1000, 1000]
+observation:
+  observation_type: image_state
+  observe_goals: true
+  positions_relative_to_agent: false
+  img_obs_size: [224, 224]
+  exogenous_noise:
+    add_noise: false
+    feature_vector_noise_dim: 0
+    feature_vector_noise_mean: 0.0
+    feature_vector_noise_std: 1.0
+    feature_vector_random_walk_noise_mean: 0.0
+    feature_vector_random_walk_noise_std: 0.3
+    image_noise_max: 256
+    image_noise_min: 200
+    image_random_walk_noise_max: 16
+    image_random_walk_noise_min: -16
+    noise_type: iid
+state:
+  positions_relative_to_agent: false
+  exogenous_noise:
+    add_noise: false
+    feature_vector_noise_dim: 0
+    feature_vector_noise_mean: 0.0
+    feature_vector_noise_std: 1.0
+    feature_vector_random_walk_noise_mean: 0.0
+    feature_vector_random_walk_noise_std: 0.3
+    image_noise_max: 256
+    image_noise_min: 200
+    image_random_walk_noise_max: 16
+    image_random_walk_noise_min: -16
+    noise_type: iid
+action:
+  control_deadzone: 0.1
+  velocity_scale: [20.0, 20.0]
+  add_transition_noise: false
+  transition_gaussian_noise_mean: [0.0, 0.0]
+  transition_gaussian_noise_std: [0.5, 0.5]
+rendering:
+  goal_size: 20
+  agent_size: 20
+  render_player_trace: false
+  trace_size: 1
+  max_trace_length: -1
+max_steps: 500
+goal:
+  termination_condition: all_goals
+  reward_per_reached_goal: 1.0
+  num_goals: 6
+  goal_ordering:
+  - 0
+  - 2
+  - 3
+  - 4
+  - 5
+  - 1
+  randomisation:
+    randomise_agent_spawn: false
+    randomise_goal_positions: false

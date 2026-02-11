@@ -1,0 +1,38 @@
+# build system using setuptools
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+# project metadata
+[project]
+name = "pidm_imitation"
+version = "0.1"
+authors = [
+    {name = "Smart Replay Team"}
+]
+description = "Understanding PIDM for Imitation Learning"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# python package dependencies
+dependencies = [
+    "coloredlogs",
+    "decord",
+    "gymnasium",
+    "jsonargparse[signatures]>=4.26.1",
+    "lightning==2.5.2",
+    "matplotlib",
+    "numpy<2.0.0",
+    "opencv-python",
+    "pygame",
+    "schema==0.7.5",  # 0.7.6 breaks our schema validation
+    "torch==2.3.1",
+    "torchaudio==2.3.1",
+    "torchvision==0.18.1",
+    "transformers==4.47.0",
+    "wandb==0.21.0",
+]
+
+# additional dependencies for development only.
+[tool.setuptools.packages]
+find = {}

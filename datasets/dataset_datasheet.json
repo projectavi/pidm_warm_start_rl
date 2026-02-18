@@ -1,0 +1,85 @@
+{
+    "name": "understanding_pidm_for_imitation_learning_2d_navigation_datasets",
+    "title": "2D navigation datasets for imitation learning to reproduce results for the \"When does predictive inverse dynamics outperform behavior cloning?\" research publication.",
+    "description": "# 2D Navigation Datasets\n\nThis directory contains navigation datasets collected from four different 2D navigation environments used for training and evaluating imitation learning models. For implementation of these datasets, see [pidm_imitation/environment/toy_env](pidm_imitation/environment/toy_env/README.md). Each environment contains trajectories from both A* optimal planners and human demonstrations. Below is an overview of the datasets, their structure, and technical specifications.\n\n| Dataset | Environment | Data Collection Method | Number of Trajectories |\n|---------|-------------|------------------------|-----------------------|\n| four_room_astar_data | Four-room | A* | 50 |\n| four_room_human_data | Four-room | Human | 50 |\n| maze_astar_data | Maze | A* | 50 |\n| maze_human_data | Maze | Human | 50 |\n| multiroom_astar_data | Multiroom | A* | 50 |\n| multiroom_human_data | Multiroom | Human | 50 |\n| zigzag_astar_data | Zigzag | A* | 50 |\n| zigzag_human_data | Zigzag | Human | 50 |\n\n## Dataset Overview\n\nThe datasets comprise navigation trajectories in grid-world environments where an agent (marked as 'A') must navigate to goal locations (marked as 'G') while avoiding walls (marked as 'W'). All environments use continuous control with joystick inputs and support visual observations.\n\n### Environment Types\n\n1. **Four-Room Environment** (`four_room_*_data/`)\n4. **Zigzag Environment** (`zigzag_*_data/`)\n2. **Maze Environment** (`maze_*_data/`)\n3. **Multi-Room Environment** (`multiroom_*_data/`)\n\n### Data Collection Methods\n\nEach environment contains two types of trajectory data:\n\n- **A* Data** (`*_astar_data/`): Optimal trajectories generated using A* pathfinding algorithm\n- **Human Data** (`*_human_data/`): Trajectories collected from human demonstrations using game controllers\n\n## Dataset Structure\n\nEach dataset contains **50 trajectories** (numbered 00-49), with each trajectory comprising 7 files:\n\n### File Types per Trajectory\n\n1. **`{env}_{method}_{id}_env_config.yaml`** - Environment configuration\n   - Layout definition (ASCII grid with walls 'W', agent start 'A', goals 'G')\n   - Action space parameters (noise, velocity scaling, control deadzone)\n   - Observation settings (image size, noise parameters, observation type)\n   - Rendering configuration (agent/goal sizes, trace settings)\n\n2. **`{env}_{method}_{id}_inputs.json`** - Input control data\n   - Timestamped controller inputs (Xbox gamepad format)\n   - Joystick positions, timing information\n   - Raw human inputs or A* converted to controller format\n\n3. **`{env}_{method}_{id}_observations.npz`** - Visual observations\n   - Compressed numpy arrays of environment observations for each timestep\n\n4. **`{env}_{method}_{id}_states.npz`** - Environment state data\n   - Compressed numpy arrays of ground truth state information for each timestep\n\n5. **`{env}_{method}_{id}_trajectory_data.npz`** - Trajectory metadata\n   - Episode information, rewards, done flags, additional trajectory data\n\n6. **`{env}_{method}_{id}_video_ticks.json`** - Video timing data\n   - Timestamp mapping for video frames\n   - Synchronization data between video and other modalities\n\n7. **`{env}_{method}_{id}_video.mp4`** - Rendered trajectory video\n   - Visual recording of the complete trajectory\n\n## Technical Specifications\n\n### Action Space\n- Continuous 2D control using normalized joystick inputs (-1 to 1)\n- Velocity scaling applied (typically 20.0 for both X/Y axes)\n- Gaussian noise injection for robustness (σ = 0.2)\n- Control deadzone handling (typically 0.1)\n\n### Observation Space\n- Feature-based state observations\n- Optional goal observation and relative positioning\n- Configurable noise injection for domain randomization",
+    "doi": "",
+    "version": "0.1",
+    "created": "2026-02-18T00:00:00.000Z",
+    "licenses": [
+        {
+            "title": "Community Data License Agreement - Permissive - Version 2.0",
+            "name": "CDLA-Permissive-2.0",
+            "path": "https://raw.githubusercontent.com/Community-Data-License-Agreements/Releases/main/CDLA-Permissive-2.0.md"
+        }
+    ],
+    "sources": [],
+    "resources": [
+        {
+            "name": "Environment configuration",
+            "description": "Configuration file specifying the task and its parameters for each trajectory",
+            "path": "*_env_config.yaml",
+            "doi": "",
+            "format": "yaml",
+            "mediatype": "application/yaml",
+            "bytes": "",
+            "date": "2026-02-18T00:00:00.000Z",
+            "encoding": "",
+            "version": "0.1",
+            "language": "",
+            "schema": [],
+            "dialect": {}
+        },
+        {
+            "name": "Agent inputs",
+            "description": "Input files containing the timestamped actions taken for each trajectory and timestep",
+            "path": "*_inputs.json",
+            "doi": "",
+            "format": "json",
+            "mediatype": "application/json",
+            "bytes": "",
+            "date": "2026-02-18T00:00:00.000Z",
+            "encoding": "",
+            "version": "0.1",
+            "language": "",
+            "schema": [],
+            "dialect": {}
+        },
+        {
+            "name": "Environment videos",
+            "description": "Videos of trajectories in the 2D navigation environment (one frame for each timestep)",
+            "path": "*_video.mp4",
+            "doi": "",
+            "format": "mp4",
+            "mediatype": "video/mp4",
+            "bytes": "",
+            "date": "2026-02-18T00:00:00.000Z",
+            "encoding": "",
+            "version": "0.1",
+            "language": "",
+            "schema": [],
+            "dialect": {}
+        }
+    ],
+    "contributors": [
+        {
+            "title": "Lukas Schaefer",
+            "path": "",
+            "email": "",
+            "role": "author, contributor"
+        },
+        {
+            "title": "Sergio Valcarcel Macua",
+            "path": "",
+            "email": "",
+            "role": "author, contributor"
+        }
+    ],
+    "privacy": [],
+    "security": [],
+    "procedures": {
+        "collection": [],
+        "processing": [],
+        "update": []
+    },
+    "use": []
+}

@@ -1,6 +1,6 @@
 # Understanding PIDM for Imitation Learning
 
-This library is designed to train imitation learning agents using Behavior Cloning (BC) and Predictive Inverse Dynamics Models (PIDM) for 2D Navigation Tasks.
+This codebase is accompanying the research paper ["When does predictive inverse dynamics outperform behavior cloning?"](https://arxiv.org/abs/2601.21718) and serves to reproduce the experiments for 2D Navigation tasks. The provided library allows to train imitation learning agents using Behavior Cloning (BC) and Predictive Inverse Dynamics Models (PIDM).
 
 ## Citation
 
@@ -86,7 +86,7 @@ python -m pidm_imitation.toy_evaluate_model \
 
 ### Datasets
 
-We provide datasets for the 2D navigation tasks used in our experiments under the `datasets/` directory. These contain 50 trajectories from a human and A* planner, each, in the Four Room, Zigzag, Maze, and Multiroom tasks. For each collected trajectory, the dataset contains the recorded video, actions, states and observations, other trajectory data, and the environment configuration file. See [datasets/README.md](datasets/README.md) for detailed information on the dataset structure and technical specifications.
+We provide datasets for the 2D navigation tasks used in our experiments under the `datasets/` directory. These contain 50 trajectories from a human and A\* planner, each, in the Four Room, Zigzag, Maze, and Multiroom tasks. For each collected trajectory, the dataset contains the recorded video, actions, states and observations, other trajectory data, and the environment configuration file. See [datasets/README.md](datasets/README.md) for detailed information on the dataset structure and technical specifications.
 
 ## Contributing
 

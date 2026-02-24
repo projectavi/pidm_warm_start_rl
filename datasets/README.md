@@ -1,16 +1,16 @@
 # 2D Navigation Datasets
 
-This directory contains navigation datasets collected from four different 2D navigation environments used for training and evaluating imitation learning models. For implementation of these datasets, see [pidm_imitation/environment/toy_env](pidm_imitation/environment/toy_env/README.md). Each environment contains trajectories from both A* optimal planners and human demonstrations. Below is an overview of the datasets, their structure, and technical specifications.
+This directory contains navigation datasets collected from four different 2D navigation environments used for training and evaluating imitation learning models. For implementation of these datasets, see [pidm_imitation/environment/toy_env](pidm_imitation/environment/toy_env/README.md). Each environment contains trajectories from both A\* optimal planners and human demonstrations. Below is an overview of the datasets, their structure, and technical specifications.
 
 | Dataset | Environment | Data Collection Method | Number of Trajectories |
 |---------|-------------|------------------------|-----------------------|
-| four_room_astar_data | Four-room | A* | 50 |
+| four_room_astar_data | Four-room | A\* | 50 |
 | four_room_human_data | Four-room | Human | 50 |
-| maze_astar_data | Maze | A* | 50 |
+| maze_astar_data | Maze | A\* | 50 |
 | maze_human_data | Maze | Human | 50 |
-| multiroom_astar_data | Multiroom | A* | 50 |
+| multiroom_astar_data | Multiroom | A\* | 50 |
 | multiroom_human_data | Multiroom | Human | 50 |
-| zigzag_astar_data | Zigzag | A* | 50 |
+| zigzag_astar_data | Zigzag | A\* | 50 |
 | zigzag_human_data | Zigzag | Human | 50 |
 
 ## Dataset Overview
@@ -28,7 +28,7 @@ The datasets comprise navigation trajectories in grid-world environments where a
 
 Each environment contains two types of trajectory data:
 
-- **A* Data** (`*_astar_data/`): Optimal trajectories generated using A* pathfinding algorithm
+- **A\* Data** (`*_astar_data/`): Optimal trajectories generated using A\* pathfinding algorithm
 - **Human Data** (`*_human_data/`): Trajectories collected from human demonstrations using game controllers
 
 ## Dataset Structure
@@ -46,7 +46,7 @@ Each dataset contains **50 trajectories** (numbered 00-49), with each trajectory
 2. **`{env}_{method}_{id}_inputs.json`** - Input control data
    - Timestamped controller inputs (Xbox gamepad format)
    - Joystick positions, timing information
-   - Raw human inputs or A* converted to controller format
+   - Raw human inputs or A\* converted to controller format
 
 3. **`{env}_{method}_{id}_observations.npz`** - Observations
    - Compressed numpy arrays of environment observations for each timestep

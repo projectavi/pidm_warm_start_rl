@@ -168,3 +168,6 @@ graphs/
 lightning_logs/
 tests/output/
 pallavic/
+checkpoints
+my_experiment
+rollout_last_0

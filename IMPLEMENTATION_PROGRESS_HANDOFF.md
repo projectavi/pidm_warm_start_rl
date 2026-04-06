@@ -17,22 +17,23 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 
 - Last updated: 2026-04-06
 - Status: in_progress
-- Active request: scaffold `pssidm` and `lssidm` integration into the supervised-learning stack
-- Current objective: replace the shared SSIDM scaffold internals with the real diagonal structured SSM core, discretisation, and recurrent inference state handling while preserving the now-stable registrations, configs, and rollout adapter seams
+- Active request: finish validating `pssidm` and `lssidm` end to end and keep the SSIDM implementation aligned with the plan and repo comparison path
+- Current objective: land the smoke-tested training and rollout path, record the recurrent planner-shape fix, and prepare the next phase of comparison-oriented cleanup and benchmarking
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
   - `configs/supervised_learning/pssidm_example.yaml`
   - `configs/supervised_learning/lssidm_example.yaml`
-  - `pidm_imitation/agents/models/ssidm.py`
-  - `pidm_imitation/agents/supervised_learning/base_models.py`
-  - `pidm_imitation/agents/supervised_learning/model_factory.py`
-  - `pidm_imitation/agents/supervised_learning/submodel_factories.py`
-  - `tests/test_ssidm_core.py`
+  - `configs/supervised_learning/pssidm_smoke.yaml`
+  - `configs/supervised_learning/lssidm_smoke.yaml`
+  - `pidm_imitation/agents/supervised_learning/inference_agents/pytorch_agents.py`
+  - `tests/test_ssidm_integration.py`
 - Decisions:
   - `pssidm` and `lssidm` stay as separate registered algorithms but share one underlying SSIDM implementation.
   - The first checkpoint is scaffold-first: method signatures, registrations, placeholder shared model behavior, and rollout adapter before real SSM math.
   - Strict `pssidm` uses fixed next-state lookahead via the repo's existing single-slice lookahead configuration and does not use `lookahead_k_onehot` as a core input.
   - `lssidm` keeps the same scaffold but activates an internal shared latent encoder so the intended training decomposition is "encode in parallel, then convolve."
+  - Example configs should use nontrivial sequence windows; `history: 7` is now the default in both SSIDM example configs so the sequence model is actually exercised.
+  - Smoke configs stay separate from the example configs to keep fast end-to-end validation isolated from longer benchmark runs.
 - Validation:
   - `python3 -m compileall pidm_imitation configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml IMPLEMENTATION_PROGRESS_HANDOFF.md ssidm_integration_plan.md`
   - local Python runtime check:
@@ -51,10 +52,20 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
       - `pssidm` and `lssidm` both instantiate through `ModelFactory` with the real SSIDM core
       - both models now report `is_recurrent = True`
       - training output shape `(batch, seq, action_dim)` and single-step eval output shape `(1, 1, action_dim)` remain correct
+  - smoke-train validation:
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/pssidm_smoke.yaml --new`
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/lssidm_smoke.yaml --new`
+    - both produced `last.ckpt` and `step=10.ckpt` in isolated checkpoint folders
+  - rollout / checkpoint-load validation:
+    - `python3 -m unittest tests.test_ssidm_core tests.test_ssidm_integration -v`
+    - `python3 -m compileall pidm_imitation tests configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml configs/supervised_learning/pssidm_smoke.yaml configs/supervised_learning/lssidm_smoke.yaml`
+    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/pssidm_smoke.yaml --agent toy_pssidm --checkpoint checkpoints/toy_pssidm_smoke/last.ckpt --episodes 1 --output_dir /tmp/ssidm_eval_pssidm`
+    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/lssidm_smoke.yaml --agent toy_lssidm --checkpoint checkpoints/toy_lssidm_smoke/last.ckpt --episodes 1 --output_dir /tmp/ssidm_eval_lssidm`
+    - both checkpoint loads succeeded and both one-episode toy rollouts completed successfully
 - Blockers:
   - none
 - Next step:
-  - commit the real shared SSIDM core checkpoint, then move to the next phase: inference/checkpoint loading smoke tests and broader end-to-end integration checks
+  - commit the smoke-validation phase, then move to comparison-readiness work: benchmark configs, longer runs against `bc`/`idm`, and any cleanup surfaced by those experiments
 
 ## Recent Completed Work
 
@@ -81,6 +92,13 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - added convolutional training forward and recurrent rollout/stateful step forward
   - added focused unit tests for recurrence/convolution equivalence, lag-0 kernel term, stability, and stepwise rollout parity
   - added integration tests for registries, input routing, rollout-action extraction, shared implementation reuse, and fixed-lookahead enforcement
+- Completed the first end-to-end SSIDM smoke-validation phase:
+  - increased `pssidm` and `lssidm` example configs from `history: 0` to `history: 7`
+  - added isolated `pssidm_smoke.yaml` and `lssidm_smoke.yaml` configs for fast train/eval checks
+  - ran short real training jobs for both variants and confirmed checkpoint generation
+  - traced and fixed a recurrent IDM-agent bug where planner inputs kept an extra batch dimension during rollout
+  - added a regression test to ensure recurrent IDM planners receive a flattened 1D state
+  - verified `toy_pssidm` and `toy_lssidm` both load checkpoints and complete a real toy rollout through `toy_evaluate_model.py`
 
 ## Worktree Notes
 

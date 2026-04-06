@@ -4,8 +4,14 @@ from types import SimpleNamespace
 import torch
 
 from pidm_imitation.agents.models.ssidm import SSIDMPolicyNetwork
+from pidm_imitation.agents.supervised_learning.inference_agents.pytorch_agents import (
+    PytorchIdmAgent,
+)
 from pidm_imitation.agents.supervised_learning.inference_agents.pytorch_valid_agents import (
     ValidPytorchAgents,
+)
+from pidm_imitation.agents.supervised_learning.inference_agents.utils.observation_handlers import (
+    StateHandler,
 )
 from pidm_imitation.agents.supervised_learning.inference_agents.utils.inference_models import (
     select_rollout_action,
@@ -84,6 +90,56 @@ class SSIDMIntegrationTests(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             ModelFactory.get_model(config, bad_datamodule)
+
+    def test_recurrent_idm_agent_passes_flat_state_to_planner(self):
+        config = create_toy_config_parser(
+            "configs/supervised_learning/pssidm_example.yaml", "toy_pssidm"
+        )
+        datamodule = SimpleNamespace(
+            state_dim=4,
+            history=0,
+            lookahead=1,
+            include_k=False,
+            lookahead_slice=[0],
+        )
+        model = ModelFactory.get_model(config, datamodule)
+
+        class DummyPlanner:
+            def __init__(self):
+                self.current_state_shape = None
+
+            def get_lookahead_state_action_and_k(
+                self, current_state, current_action, current_step
+            ):
+                self.current_state_shape = tuple(current_state.shape)
+                return (
+                    torch.zeros(4, dtype=torch.float32),
+                    torch.zeros(2, dtype=torch.float32),
+                    0,
+                )
+
+        planner = DummyPlanner()
+        agent = PytorchIdmAgent(
+            config=config,
+            model=model,
+            model_hparams={},
+            data_hparams={
+                "history": 0,
+                "history_slice": [],
+                "padding_strategy": "zero",
+                "lookahead": 1,
+                "include_k": False,
+                "lookahead_slice": [0],
+            },
+            model_path=".",
+            observation_handler=StateHandler(config.state_config.type),
+            idm_planner=planner,  # type: ignore[arg-type]
+        )
+        agent._get_inputs(
+            raw_obs=None,
+            built_obs={"states": [1.0, 2.0, 3.0, 4.0]},
+        )
+        self.assertEqual(planner.current_state_shape, (4,))
 
 
 if __name__ == "__main__":

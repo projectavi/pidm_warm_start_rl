@@ -250,10 +250,11 @@ class PytorchIdmAgent(PytorchAgent):
     def _get_inputs(self, raw_obs: Any, built_obs: Any) -> Dict[str, Tensor]:
         inputs = super()._get_inputs(raw_obs, built_obs)
         curr_raw_state = inputs[STATE_HISTORY_KEY]
+        planner_state = curr_raw_state.reshape(-1)
 
         lookahead_state, lookahead_action, lookahead_k = (
             self.idm_planner.get_lookahead_state_action_and_k(
-                current_state=curr_raw_state.squeeze(1),
+                current_state=planner_state,
                 current_action=(
                     self.prev_action if self.prev_action is not None else None
                 ),

@@ -28,7 +28,7 @@ wandb:
   eval_group: TestRuns
   save_dir: ./logs
   log_model: false
-  offline: false
+  offline: true
   train_name: toy_pssidm_example
   eval_name: toy_pssidm_example/eval
   train_group: TestRuns
@@ -62,7 +62,7 @@ callbacks:
     verbose: false
     save_last: true
     save_on_train_epoch_end: true
-    dirpath: checkpoints
+    dirpath: checkpoints/toy_pssidm_example
 
 data:
   train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/
@@ -71,10 +71,10 @@ data:
   shuffle_trajectories: true
   batch_size: 128
   num_workers: 1
-  history: 0
+  history: 7
   history_slice_specs:
     class_name: LinearSlicer
-    num_samples: 0
+    num_samples: 7
   lookahead: 1
   lookahead_slice_specs:
     class_name: LinearSlicer

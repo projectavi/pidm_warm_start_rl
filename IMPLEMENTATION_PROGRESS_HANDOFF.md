@@ -16,9 +16,9 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 ## Current Snapshot
 
 - Last updated: 2026-04-06
-- Status: in_progress
+- Status: ready_for_next_phase
 - Active request: scaffold `pssidm` and `lssidm` integration into the supervised-learning stack
-- Current objective: finish the first shared scaffold checkpoint so the new algorithms are registered, constructible, and able to pass sequence-shaped data through training and inference entrypoints
+- Current objective: replace the shared SSIDM scaffold internals with the real component-by-component implementation while preserving the now-stable registrations, configs, and rollout adapter seams
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
   - `ssidm_integration_plan.md`
@@ -47,10 +47,11 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
     - verified both route `state_history` and `state_lookahead` into the policy head
     - instantiated both models through `ModelFactory`
     - verified both return predicted actions with shape `(batch, seq, action_dim)`
+  - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
 - Blockers:
   - none
 - Next step:
-  - review the final scaffold diff, commit the checkpoint, and then begin replacing scaffold internals with the real shared SSIDM components
+  - implement the real shared `StructuredSSMCore` and replace the placeholder feed-forward paths while keeping `pssidm` and `lssidm` on the same shared implementation
 
 ## Recent Completed Work
 
@@ -65,6 +66,12 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - moved from a single `ssidm` mode to separate `pssidm` and `lssidm`
   - aligned the plan with strict raw-state `pssidm` semantics and a shared-implementation `lssidm` extension
   - fixed the repo-specific lookahead mapping so version 1 uses fixed next-state reference via the existing data config
+- Added the initial `pssidm` / `lssidm` scaffold and committed `ba1466c`:
+  - registered `pssidm` and `lssidm` across model, inference, and toy-agent registries
+  - added shared SSIDM input routing and fixed-lookahead validation
+  - added a shared placeholder `SSIDMPolicyNetwork` / `StructuredSSMCore`
+  - added rollout-action selection for sequence-valued policy outputs
+  - added `pssidm` and `lssidm` example configs
 
 ## Worktree Notes
 

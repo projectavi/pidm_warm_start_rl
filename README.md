@@ -69,6 +69,20 @@ python -m pidm_imitation.agents.supervised_learning.train \
     --new
 ```
 
+We now also provide example configs that switch the algorithm to the SSIDM modes:
+
+```bash
+python -m pidm_imitation.agents.supervised_learning.train \
+    --config configs/supervised_learning/pssidm_example.yaml \
+    --new
+
+python -m pidm_imitation.agents.supervised_learning.train \
+    --config configs/supervised_learning/lssidm_example.yaml \
+    --new
+```
+
+`pssidm` implements the brief’s raw-state structured SSM PIDM, while `lssidm` shares the same SSIDM core but adds an internal latent encoder that maps executed and reference states into learned coordinates before the convolutional training pass.
+
 See [pidm_imitation/agents/README.md](pidm_imitation/agents/README.md) for all CLI arguments, supported algorithms, and model architectures.
 
 ### Evaluation / Rollouts in 2D Toy Environment
@@ -82,6 +96,24 @@ python -m pidm_imitation.toy_evaluate_model \
     --checkpoint checkpoints/last.ckpt \
     --agent toy_idm \
     --episodes 10
+```
+
+We now provide SSIDM evaluation agents as well. After training, evaluate the SSIDM policies with the matching toy agent name:
+
+```bash
+python -m pidm_imitation.toy_evaluate_model \
+    --toy_config datasets/four_room_human_data/four_room_human_00_env_config.yaml \
+    --config configs/supervised_learning/pssidm_example.yaml \
+    --checkpoint checkpoints/toy_pssidm_example/last.ckpt \
+    --agent toy_pssidm \
+    --episodes 5
+
+python -m pidm_imitation.toy_evaluate_model \
+    --toy_config datasets/four_room_human_data/four_room_human_00_env_config.yaml \
+    --config configs/supervised_learning/lssidm_example.yaml \
+    --checkpoint checkpoints/toy_lssidm_example/last.ckpt \
+    --agent toy_lssidm \
+    --episodes 5
 ```
 
 ### Datasets

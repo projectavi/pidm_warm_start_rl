@@ -52,20 +52,32 @@ The codebase supports the following algorithms, each mapping to a specific actio
 
 | Algorithm | Config Value | Action Regressor Class | Description |
 |-----------|--------------|------------------------|-------------|
-| Behavioral Cloning | `bc` | `SingleHeadActionRegressor` | Predicts actions from state/ action history |
-| Inverse Dynamics Model | `idm` | `SingleHeadActionRegressor` | Predicts actions given current state and a future goal state (lookahead) |
+| Behavioral Cloning | `bc` | `SingleHeadActionRegressor` | Predicts actions from state/action history |
+| Inverse Dynamics Model | `idm` | `SingleHeadActionRegressor` | Predicts actions given current state with a future reference (lookahead) |
+| Structured SSM PIDM | `pssidm` | `SingleHeadActionRegressor` (with `SSIDMPolicyNetwork`) | Raw-state structured state-space model with seq-to-seq convolutional training and recurrent IDM-style rollout |
+| Latent Structured SSM PIDM | `lssidm` | `SingleHeadActionRegressor` (with `SSIDMPolicyNetwork`) | Same SSM core but applies a shared latent encoder over executed/reference sequences before the structured SSM stage |
 
 ### Configuration Example
 
 ```yaml
 model:
-  algorithm: idm  # One of: bc, idm
+  algorithm: pssidm  # One of: bc, idm, pssidm, lssidm
   input_format: state_only
   submodels:
     state_encoder:
       # ...
     policy_head:
-      # ...
+      class_name: PolicyHead
+      init_args:
+        policy_model:
+          class_name: SSIDMPolicyNetwork
+          init_args:
+            ssm_state_dim: 64
+            hippo_init: true
+            diagonal_A: true
+```
+
+See `configs/supervised_learning/pssidm_example.yaml` and `configs/supervised_learning/lssidm_example.yaml` for end-to-end configurations that reuse the existing training DAG.
 ```
 
 ## Input Formats

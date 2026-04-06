@@ -31,6 +31,7 @@ class ToyEvaluationContext(EvaluationContext):
         self.toy_config: str = args.toy_config
         self.save_trajectories: bool = args.save_trajectories
         self.save_video: bool = args.save_video
+        self.save_results: bool = args.save_results
 
 
 class ToyEnvExperimentResult:
@@ -169,6 +170,11 @@ class ToyEnvExperimentResult:
             self.extra_metrics[k].append(v)
 
     def get_log_dict(self) -> Dict[str, float | int]:
+        def to_python_scalar(value: Any) -> Any:
+            if isinstance(value, np.generic):
+                return value.item()
+            return value
+
         log_dict = {
             "step_count": self.ep_steps[-1],
             "episode_time": self.ep_durations[-1],
@@ -180,13 +186,13 @@ class ToyEnvExperimentResult:
 
         # add episode metrics
         for metric, values in self.ep_metrics.items():
-            latest_value = values[-1]
+            latest_value = to_python_scalar(values[-1])
             avg_value = float(np.mean(values))
             log_dict.update({f"avg_{metric}": avg_value, metric: latest_value})
 
         # Add extra metrics
         for metric, values in self.extra_metrics.items():
-            latest_value = values[-1]
+            latest_value = to_python_scalar(values[-1])
             avg_value = float(np.mean(values))
             log_dict.update({f"avg_{metric}": avg_value, metric: latest_value})
 

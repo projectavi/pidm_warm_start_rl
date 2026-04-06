@@ -97,3 +97,4 @@ def add_toy_eval_args(parser, valid_agents) -> None:
     parser.add_argument(
         "--save_video", action="store_true", help="Save video recording of each episode (only with --save_trajectories)"
     )
+    parser.add_argument("--save_results", action="store_true", help="Save final metrics to a results.json file in the output directory")

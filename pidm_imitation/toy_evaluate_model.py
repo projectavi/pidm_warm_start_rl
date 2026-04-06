@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 import argparse
+import json
 import sys
 
 import wandb
@@ -77,6 +78,13 @@ def toy_env_evaluate(
             )
     finally:
         env.close()
+
+    if context.save_results and result is not None:
+        import os
+        results_file = os.path.join(context.rollout_folder, "results.json")
+        with open(results_file, "w") as f:
+            json.dump(result.get_log_dict(), f, indent=4)
+        log.info(f"Saved evaluation results to {results_file}")
 
     return result
 

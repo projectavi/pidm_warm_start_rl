@@ -173,3 +173,4 @@ checkpoints/
 my_experiment/
 oss_configs/
 rollout_last_0/
+outputs

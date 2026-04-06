@@ -260,6 +260,8 @@ class PytorchLightningConfig(SubConfig):
         if self.seed_everything is None:
             log.warning("No seed provided for PyTorch Lightning.")
         self.trainer = self._config.get("trainer", {})
+        if "devices" not in self.trainer:
+            self.trainer["devices"] = 1
         self.fit_kwargs = self._config.get("fit_kwargs", {})
         self.scheduler = self._config.get("scheduler", "constant")
         self.scheduler_kwargs = self._config.get("scheduler_kwargs", {})

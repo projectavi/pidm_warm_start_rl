@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+import math
 from typing import Tuple
 
 import torch
@@ -9,46 +10,199 @@ from torch import Tensor, nn
 from pidm_imitation.utils.valid_controller_actions import ValidControllerActions
 
 
+def hippo_legs(N: int) -> Tensor:
+    """
+    Return the HiPPO-LegS matrix used to initialize the stable continuous-time dynamics.
+    """
+    if N <= 0:
+        raise ValueError(f"HiPPO dimension must be positive, got {N}.")
+
+    A = torch.zeros(N, N, dtype=torch.float32)
+    for n in range(N):
+        for k in range(N):
+            if n > k:
+                A[n, k] = -math.sqrt(2 * n + 1) * math.sqrt(2 * k + 1)
+            elif n == k:
+                A[n, k] = -(n + 1)
+    return A
+
+
+def causal_conv_fft(u_tilde: Tensor, K: Tensor) -> Tensor:
+    """
+    Compute the causal convolution y_k = sum_{j=0}^k K_{k-j} u_j via FFT.
+
+    Args:
+        u_tilde: (batch, seq_len, d_in)
+        K:       (seq_len, d_out, d_in)
+    Returns:
+        (batch, seq_len, d_out)
+    """
+    batch_size, seq_len, d_in = u_tilde.shape
+    _, d_out, kernel_d_in = K.shape
+    if d_in != kernel_d_in:
+        raise ValueError(
+            f"Kernel input dim mismatch, got input dim {d_in} and kernel dim {kernel_d_in}."
+        )
+
+    fft_len = 1 << (2 * seq_len - 1).bit_length()
+    U_f = torch.fft.rfft(u_tilde.transpose(1, 2), n=fft_len)
+    K_f = torch.fft.rfft(K.permute(1, 2, 0), n=fft_len)
+    Y_f = torch.einsum("bif,oif->bof", U_f, K_f)
+    y = torch.fft.irfft(Y_f, n=fft_len)[..., :seq_len]
+    return y.transpose(1, 2)
+
+
 class StructuredSSMCore(nn.Module):
     """
-    Shared scaffold for the future SSIDM core.
+    Continuous-time linear state space model with ZOH discretisation.
 
-    The real implementation will replace these placeholder feed-forward paths with the
-    structured convolutional training operator and recurrent rollout operator. The method
-    surface is already aligned with that end state so the surrounding scaffold can settle now.
+    This implements the exact diagonal-A version from the implementation brief:
+        x'(t) = A x(t) + B u_tilde(t)
+        y(t)  = C x(t) + D u_tilde(t)
+    with recurrent discrete inference and convolutional training.
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int, action_dim: int):
+    def __init__(
+        self,
+        stream_dim: int,
+        action_dim: int,
+        ssm_state_dim: int = 64,
+        delta_init: float = 1.0,
+        hippo_init: bool = True,
+        diagonal_A: bool = True,
+    ):
         super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
+        if stream_dim <= 0:
+            raise ValueError(f"stream_dim must be positive, got {stream_dim}.")
+        if action_dim <= 0:
+            raise ValueError(f"action_dim must be positive, got {action_dim}.")
+        if ssm_state_dim <= 0:
+            raise ValueError(f"ssm_state_dim must be positive, got {ssm_state_dim}.")
+        if delta_init <= 0:
+            raise ValueError(f"delta_init must be positive, got {delta_init}.")
+        if not diagonal_A:
+            raise NotImplementedError(
+                "Only the exact diagonal-A SSIDM core is implemented in this phase."
+            )
+
+        self.N = ssm_state_dim
+        self.stream_dim = stream_dim
         self.action_dim = action_dim
-        self.input_projection = nn.Linear(input_dim, hidden_dim)
-        self.activation = nn.ReLU()
-        self.output_projection = nn.Sequential(
-            nn.Linear(hidden_dim, action_dim),
-            nn.Tanh(),
+        self.diagonal_A = diagonal_A
+
+        if hippo_init:
+            hippo_diag = -torch.diag(hippo_legs(self.N))
+            init_log_neg_lambda = torch.log(hippo_diag)
+        else:
+            init_log_neg_lambda = torch.zeros(self.N, dtype=torch.float32)
+        self.log_neg_lambda = nn.Parameter(init_log_neg_lambda)
+
+        b_scale = 1.0 / math.sqrt(self.N)
+        self.B_e = nn.Parameter(torch.randn(self.N, self.stream_dim) * b_scale)
+        self.B_f = nn.Parameter(torch.randn(self.N, self.stream_dim) * b_scale)
+        self.C = nn.Parameter(torch.randn(self.action_dim, self.N) * b_scale)
+        self.D_e = nn.Parameter(torch.zeros(self.action_dim, self.stream_dim))
+        self.D_f = nn.Parameter(torch.zeros(self.action_dim, self.stream_dim))
+        self.log_delta = nn.Parameter(
+            torch.tensor(math.log(delta_init), dtype=torch.float32)
         )
+
         self._cached_state: Tensor | None = None
 
-    def _project(self, inputs: Tensor) -> Tensor:
-        projected = self.input_projection(inputs)
-        return self.output_projection(self.activation(projected))
+    def get_A(self) -> Tensor:
+        lambda_ = -torch.exp(self.log_neg_lambda)
+        return torch.diag(lambda_)
 
-    def forward_convolution(self, inputs: Tensor) -> Tensor:
-        return self._project(inputs)
+    def get_B(self) -> Tensor:
+        return torch.cat([self.B_e, self.B_f], dim=-1)
 
-    def forward_recurrent(self, inputs: Tensor) -> Tensor:
-        outputs = self._project(inputs)
-        self._cached_state = outputs[:, -1, :].detach()
-        return outputs
+    def get_D(self) -> Tensor:
+        return torch.cat([self.D_e, self.D_f], dim=-1)
 
-    def step(self, inputs: Tensor) -> Tensor:
-        if inputs.ndim == 2:
-            inputs = inputs.unsqueeze(1)
-        outputs = self._project(inputs)
-        self._cached_state = outputs[:, -1, :].detach()
-        return outputs[:, -1:, :]
+    def discretise(self) -> Tuple[Tensor, Tensor]:
+        A = self.get_A()
+        B = self.get_B()
+        delta = torch.exp(self.log_delta).to(device=A.device, dtype=A.dtype)
+
+        N = A.shape[0]
+        M = torch.zeros(2 * N, 2 * N, device=A.device, dtype=A.dtype)
+        M[:N, :N] = delta * A
+        M[:N, N:] = delta * torch.eye(N, device=A.device, dtype=A.dtype)
+
+        eM = torch.linalg.matrix_exp(M)
+        A_bar = eM[:N, :N]
+        B_int = eM[:N, N:]
+        B_bar = B_int @ B
+        return A_bar, B_bar
+
+    def build_kernel(self, seq_len: int) -> Tensor:
+        A_bar, B_bar = self.discretise()
+        D = self.get_D()
+
+        kernel = [self.C @ B_bar + D]
+        A_pow = A_bar
+        for _ in range(1, seq_len):
+            kernel.append(self.C @ A_pow @ B_bar)
+            A_pow = A_pow @ A_bar
+        return torch.stack(kernel, dim=0)
+
+    def _get_initial_state(
+        self, batch_size: int, device: torch.device, dtype: torch.dtype, use_cached: bool
+    ) -> Tensor:
+        if (
+            use_cached
+            and self._cached_state is not None
+            and self._cached_state.shape[0] == batch_size
+        ):
+            return self._cached_state.to(device=device, dtype=dtype)
+        return torch.zeros(batch_size, self.N, device=device, dtype=dtype)
+
+    def forward_recurrent(
+        self,
+        u: Tensor,
+        u_ref: Tensor,
+        use_cached_state: bool = False,
+        update_cache: bool = False,
+    ) -> Tensor:
+        batch_size, seq_len, _ = u.shape
+        A_bar, B_bar = self.discretise()
+        D = self.get_D()
+        u_tilde = torch.cat([u, u_ref], dim=-1)
+
+        x = self._get_initial_state(
+            batch_size=batch_size,
+            device=u.device,
+            dtype=u.dtype,
+            use_cached=use_cached_state,
+        )
+        ys = []
+        for k in range(seq_len):
+            x = x @ A_bar.T + u_tilde[:, k, :] @ B_bar.T
+            y_k = x @ self.C.T + u_tilde[:, k, :] @ D.T
+            ys.append(y_k)
+
+        if update_cache:
+            self._cached_state = x.detach()
+        return torch.stack(ys, dim=1)
+
+    def forward_convolve(self, u: Tensor, u_ref: Tensor) -> Tensor:
+        batch_size, seq_len, _ = u.shape
+        del batch_size
+        u_tilde = torch.cat([u, u_ref], dim=-1)
+        kernel = self.build_kernel(seq_len)
+        return causal_conv_fft(u_tilde, kernel)
+
+    def step(self, u: Tensor, u_ref: Tensor) -> Tensor:
+        if u.ndim == 2:
+            u = u.unsqueeze(1)
+        if u_ref.ndim == 2:
+            u_ref = u_ref.unsqueeze(1)
+        return self.forward_recurrent(
+            u,
+            u_ref,
+            use_cached_state=True,
+            update_cache=True,
+        )
 
     def reset(self) -> None:
         self._cached_state = None
@@ -56,12 +210,12 @@ class StructuredSSMCore(nn.Module):
 
 class SSIDMPolicyNetwork(nn.Module):
     """
-    Shared scaffold policy for both PSSIDM and LSSIDM.
+    Shared SSIDM implementation for both PSSIDM and LSSIDM.
 
-    Version 1 of this class deliberately keeps the surrounding repo contracts stable first:
-    - sequence-valued forward pass for training
-    - step/recurrent signatures for rollout integration
-    - optional internal shared latent encoder for LSSIDM
+    PSSIDM uses raw executed/reference state streams directly.
+    LSSIDM applies one shared pointwise latent encoder to both streams before the same
+    structured SSM core. Training uses the convolutional forward path; inference uses
+    the recurrent path with persistent internal state.
     """
 
     def __init__(
@@ -69,71 +223,83 @@ class SSIDMPolicyNetwork(nn.Module):
         input_dim: int,
         state_dim: int,
         action_type: str,
-        hidden_dim: int = 128,
+        ssm_state_dim: int = 64,
+        delta_init: float = 1.0,
+        hippo_init: bool = True,
+        diagonal_A: bool = True,
         latent_encoder_dim: int = 128,
         use_latent_encoder: bool = False,
     ):
         super().__init__()
+        if action_type != ValidControllerActions.LEFT_STICK:
+            raise ValueError(
+                f"Unsupported action type for SSIDMPolicyNetwork: {action_type}"
+            )
+        if input_dim != 2 * state_dim:
+            raise ValueError(
+                "SSIDMPolicyNetwork currently expects only the strict state_only input "
+                f"contract [state_history; state_lookahead], got input_dim={input_dim} "
+                f"and state_dim={state_dim}."
+            )
+
         self.input_dim = input_dim
         self.state_dim = state_dim
         self.action_type = action_type
-        self.hidden_dim = hidden_dim
-        self.latent_encoder_dim = latent_encoder_dim
         self.use_latent_encoder = use_latent_encoder
+        self.stream_dim = latent_encoder_dim if use_latent_encoder else state_dim
+        self.action_dim = ValidControllerActions.get_actions_dim(action_type)
 
-        assert (
-            action_type == ValidControllerActions.LEFT_STICK
-        ), f"Unsupported action type for SSIDM scaffold: {action_type}"
-        assert (
-            input_dim >= 2 * state_dim
-        ), f"SSIDM scaffold expects at least two state streams, got input_dim={input_dim}, state_dim={state_dim}."
-
-        self.executed_dim = state_dim
-        self.reference_dim = input_dim - state_dim
-
-        core_stream_dim = self.executed_dim
         if self.use_latent_encoder:
-            assert self.reference_dim == self.executed_dim, (
-                "Shared latent encoder scaffold expects executed and reference streams "
-                f"to have matching dimensions, got {self.executed_dim} and {self.reference_dim}."
-            )
-            self.shared_latent_encoder = nn.Sequential(
-                nn.Linear(self.executed_dim, latent_encoder_dim),
+            self.shared_latent_encoder: nn.Module = nn.Sequential(
+                nn.Linear(state_dim, latent_encoder_dim),
                 nn.ReLU(),
             )
-            core_stream_dim = latent_encoder_dim
         else:
-            self.shared_latent_encoder = None
+            self.shared_latent_encoder = nn.Identity()
 
         self.core = StructuredSSMCore(
-            input_dim=2 * core_stream_dim,
-            hidden_dim=hidden_dim,
-            action_dim=ValidControllerActions.get_actions_dim(action_type),
+            stream_dim=self.stream_dim,
+            action_dim=self.action_dim,
+            ssm_state_dim=ssm_state_dim,
+            delta_init=delta_init,
+            hippo_init=hippo_init,
+            diagonal_A=diagonal_A,
         )
 
     def _split_streams(self, inputs: Tensor) -> Tuple[Tensor, Tensor]:
-        executed = inputs[..., : self.executed_dim]
-        reference = inputs[..., self.executed_dim :]
+        executed = inputs[..., : self.state_dim]
+        reference = inputs[..., self.state_dim :]
         return executed, reference
 
-    def _combine_streams(self, inputs: Tensor) -> Tensor:
+    def _encode_streams(self, inputs: Tensor) -> Tuple[Tensor, Tensor]:
         executed, reference = self._split_streams(inputs)
-        if self.shared_latent_encoder is not None:
-            executed = self.shared_latent_encoder(executed)
-            reference = self.shared_latent_encoder(reference)
-        return torch.cat([executed, reference], dim=-1)
+        return self.shared_latent_encoder(executed), self.shared_latent_encoder(
+            reference
+        )
 
     def forward_convolution(self, inputs: Tensor) -> Tensor:
-        return self.core.forward_convolution(self._combine_streams(inputs))
+        executed, reference = self._encode_streams(inputs)
+        return self.core.forward_convolve(executed, reference)
 
     def forward_recurrent(self, inputs: Tensor) -> Tensor:
-        return self.core.forward_recurrent(self._combine_streams(inputs))
+        executed, reference = self._encode_streams(inputs)
+        return self.core.forward_recurrent(
+            executed,
+            reference,
+            use_cached_state=False,
+            update_cache=False,
+        )
 
     def forward_step(self, inputs: Tensor) -> Tensor:
-        return self.core.step(self._combine_streams(inputs))
+        executed, reference = self._encode_streams(inputs)
+        return self.core.step(executed, reference)
 
     def forward(self, inputs: Tensor) -> Tensor:
-        return self.forward_convolution(inputs)
+        if self.training:
+            return self.forward_convolution(inputs)
+        if inputs.shape[1] == 1:
+            return self.forward_step(inputs)
+        return self.forward_recurrent(inputs)
 
     def reset(self) -> None:
         self.core.reset()
@@ -144,6 +310,8 @@ class SSIDMPolicyNetwork(nn.Module):
 
     @property
     def is_recurrent(self) -> bool:
-        # The scaffold uses the sliding-window rollout path first. The real SSIDM recurrent
-        # agent path can be enabled once the recurrent core is implemented and validated.
-        return False
+        return True
+
+    @property
+    def out_dim(self) -> int:
+        return self.action_dim

@@ -16,24 +16,18 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 ## Current Snapshot
 
 - Last updated: 2026-04-06
-- Status: ready_for_next_phase
+- Status: in_progress
 - Active request: scaffold `pssidm` and `lssidm` integration into the supervised-learning stack
-- Current objective: replace the shared SSIDM scaffold internals with the real component-by-component implementation while preserving the now-stable registrations, configs, and rollout adapter seams
+- Current objective: replace the shared SSIDM scaffold internals with the real diagonal structured SSM core, discretisation, and recurrent inference state handling while preserving the now-stable registrations, configs, and rollout adapter seams
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
-  - `ssidm_integration_plan.md`
   - `configs/supervised_learning/pssidm_example.yaml`
   - `configs/supervised_learning/lssidm_example.yaml`
-  - `pidm_imitation/utils/valid_models.py`
-  - `pidm_imitation/agents/supervised_learning/model_factory.py`
-  - `pidm_imitation/agents/supervised_learning/inputs_factory.py`
-  - `pidm_imitation/agents/supervised_learning/inference_agents/pytorch_valid_agents.py`
-  - `pidm_imitation/agents/supervised_learning/inference_agents/pytorch_agents_factory.py`
-  - `pidm_imitation/agents/supervised_learning/inference_agents/utils/inference_models.py`
-  - `pidm_imitation/evaluation/toy_valid_agents.py`
-  - `pidm_imitation/agents/models/policy_models.py`
-  - `pidm_imitation/agents/supervised_learning/submodel_factories.py`
   - `pidm_imitation/agents/models/ssidm.py`
+  - `pidm_imitation/agents/supervised_learning/base_models.py`
+  - `pidm_imitation/agents/supervised_learning/model_factory.py`
+  - `pidm_imitation/agents/supervised_learning/submodel_factories.py`
+  - `tests/test_ssidm_core.py`
 - Decisions:
   - `pssidm` and `lssidm` stay as separate registered algorithms but share one underlying SSIDM implementation.
   - The first checkpoint is scaffold-first: method signatures, registrations, placeholder shared model behavior, and rollout adapter before real SSM math.
@@ -48,10 +42,19 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
     - instantiated both models through `ModelFactory`
     - verified both return predicted actions with shape `(batch, seq, action_dim)`
   - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
+  - real-core validation:
+    - `python3 -m compileall pidm_imitation tests configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml`
+    - `python3 -m unittest tests.test_ssidm_core -v`
+    - `python3 -m unittest tests.test_ssidm_core tests.test_ssidm_integration -v`
+    - local Python check confirmed:
+      - recurrent/convolution equivalence for `StructuredSSMCore` under random and HiPPO init
+      - `pssidm` and `lssidm` both instantiate through `ModelFactory` with the real SSIDM core
+      - both models now report `is_recurrent = True`
+      - training output shape `(batch, seq, action_dim)` and single-step eval output shape `(1, 1, action_dim)` remain correct
 - Blockers:
   - none
 - Next step:
-  - implement the real shared `StructuredSSMCore` and replace the placeholder feed-forward paths while keeping `pssidm` and `lssidm` on the same shared implementation
+  - commit the real shared SSIDM core checkpoint, then move to the next phase: inference/checkpoint loading smoke tests and broader end-to-end integration checks
 
 ## Recent Completed Work
 
@@ -72,6 +75,12 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - added a shared placeholder `SSIDMPolicyNetwork` / `StructuredSSMCore`
   - added rollout-action selection for sequence-valued policy outputs
   - added `pssidm` and `lssidm` example configs
+- Replaced the placeholder SSIDM scaffold with the first real shared core:
+  - implemented diagonal continuous-time `A`, learned `B_e/B_f/C/D_e/D_f`, and learned `delta`
+  - added exact ZOH discretisation via augmented-matrix exponential
+  - added convolutional training forward and recurrent rollout/stateful step forward
+  - added focused unit tests for recurrence/convolution equivalence, lag-0 kernel term, stability, and stepwise rollout parity
+  - added integration tests for registries, input routing, rollout-action extraction, shared implementation reuse, and fixed-lookahead enforcement
 
 ## Worktree Notes
 

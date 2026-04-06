@@ -80,7 +80,11 @@ class ActionRegressor(pl.LightningModule, TrainingProgressMixin):
 
     @property
     def is_recurrent(self) -> bool:
-        return self.state_encoder_model.is_recurrent or any(
+        return (
+            self.state_encoder_model.is_recurrent
+            if self.state_encoder_model
+            else False
+        ) or any(
             head.is_recurrent for head in self.heads.values()
         )
 

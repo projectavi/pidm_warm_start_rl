@@ -21,6 +21,7 @@ from pidm_imitation.agents.supervised_learning.inference_agents.utils.action_han
 from pidm_imitation.agents.supervised_learning.inference_agents.utils.inference_models import (
     SlidingWindowInferenceIdmModel,
     SlidingWindowInferenceModel,
+    select_rollout_action,
 )
 from pidm_imitation.agents.supervised_learning.inference_agents.utils.observation_handlers import (
     ObservationHandler,
@@ -174,6 +175,7 @@ class PytorchAgent(Agent):
         """
         with torch.inference_mode():
             action = self._get_policy_path_predictions(raw_obs, built_obs)
+            action = select_rollout_action(action)
             self.prev_action = self.action_handler.process_predicted_action(action)
             self.prev_action = self.prev_action.flatten()
             return self.prev_action.cpu().numpy()

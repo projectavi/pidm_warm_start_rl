@@ -1,0 +1,99 @@
+experiment_name: toy_pssidm_example
+
+state:
+  type: states
+
+action:
+  type: left_stick
+
+reference_trajectory:
+  video: four_room_human_00_video.mp4
+  inputs: four_room_human_00_inputs.json
+
+agent:
+  type: toy_pssidm
+  seed: 5678
+  planner_type: closest_reference
+  idm_planner:
+    eval_lookahead_type: fixed
+    eval_lookahead: 0
+    planner_kwargs:
+      distance_measure: l2
+      masking_conditions:
+        - ["toy_same_goal", {}]
+
+wandb:
+  username: t-luschaefer
+  project: Lukas_Sandbox
+  eval_group: TestRuns
+  save_dir: ./logs
+  log_model: false
+  offline: false
+  train_name: toy_pssidm_example
+  eval_name: toy_pssidm_example/eval
+  train_group: TestRuns
+
+pytorch_lightning:
+  seed_everything: 5678
+  trainer:
+    strategy: auto
+    accelerator: gpu
+    enable_checkpointing: true
+    enable_progress_bar:
+    enable_model_summary: true
+    max_steps: 100
+  optimizer: adam
+  optimizer_kwargs:
+    lr: 0.00001
+
+callbacks:
+  checkpoint_callback: true
+  checkpoint_callback_kwargs:
+    save_top_k: -1
+    every_n_epochs: 0
+    every_n_train_steps: 100
+    every_n_steps_custom:
+      classname: exponential
+      init_args:
+        every_n_train_steps: 50
+        increase_power: 10
+        increase_on_n_steps: 100
+    filename: "{step}"
+    verbose: false
+    save_last: true
+    save_on_train_epoch_end: true
+    dirpath: checkpoints
+
+data:
+  train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/
+  num_train_samples: 40
+  num_validation_samples: 5
+  shuffle_trajectories: true
+  batch_size: 128
+  num_workers: 1
+  history: 0
+  history_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 0
+  lookahead: 1
+  lookahead_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 1
+  include_k: false
+  padding_strategy: zero
+  alignment_strategy: causal_action_frame_alignment
+
+model:
+  algorithm: pssidm
+  input_format: state_only
+  submodels:
+    policy_head:
+      class_name: PolicyHead
+      init_args:
+        policy_model:
+          class_name: SSIDMPolicyNetwork
+          init_args:
+            hidden_dim: 256
+            latent_encoder_dim: 128
+        action_loss:
+          continuous_loss: l1

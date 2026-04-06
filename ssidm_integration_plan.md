@@ -189,6 +189,19 @@ Important clarification:
 
 ## Implementation Work Plan
 
+Execution discipline for this work:
+
+- keep `IMPLEMENTATION_PROGRESS_HANDOFF.md` updated at the start and end of each substantive phase
+- commit at each stable checkpoint rather than waiting for the full feature to land
+- favor scaffold-first integration: registrations and signatures first, then basic data-flow implementations, then real component math
+
+The practical build sequence should therefore be:
+
+1. lay out the framework with method signatures, registry entries, factory routing, and rollout-adapter seams
+2. add minimal shared implementations so batches can flow through training and inference without the full SSM math yet
+3. replace the placeholders component by component with the real shared SSIDM implementation
+4. validate each checkpoint before moving on
+
 ### Phase 1: Register `pssidm` and `lssidm` everywhere the repo enumerates algorithms
 
 Update the registries so `pssidm` and `lssidm` are treated as first-class modes:
@@ -507,13 +520,15 @@ Optional in version 1 if time permits, but planned explicitly:
 
 ## Recommended Build Order
 
-1. Register the new algorithm and agent names.
-2. Route `pssidm` and `lssidm` through IDM-style inputs and inference selection.
-3. Implement the strict raw-state SSIDM policy network for `pssidm` with both convolutional training and recurrent inference paths.
-4. Add the rollout adapter that converts SSIDM sequence semantics into the existing one-action agent loop.
-5. Add a working `pssidm` example config.
-6. Add focused tests, especially convolution-vs-recurrence equivalence.
-7. Implement `lssidm` with shared pointwise/timestep-wise encoding inside the SSIDM model.
-8. Add a second example config and encoder-constraint tests.
-9. Run training and rollout smoke tests.
-10. Only then start benchmark comparisons against `bc`, `idm`, `pssidm`, and `lssidm`.
+1. Update `IMPLEMENTATION_PROGRESS_HANDOFF.md` and keep it current throughout the work.
+2. Register the new algorithm and agent names.
+3. Route `pssidm` and `lssidm` through IDM-style inputs and inference selection.
+4. Add a shared scaffold `SSIDMPolicyNetwork` and rollout adapter so data can flow end to end with sequence-shaped outputs.
+5. Commit the scaffold checkpoint once registrations, construction, and basic data flow are validated.
+6. Replace the scaffold internals with the strict raw-state SSIDM implementation for `pssidm`, preserving convolutional training and recurrent inference interfaces.
+7. Add a working `pssidm` example config.
+8. Add focused tests, especially convolution-vs-recurrence equivalence.
+9. Extend the same shared implementation with the internal latent-encoder path for `lssidm`.
+10. Add a second example config and encoder-constraint tests.
+11. Run training and rollout smoke tests.
+12. Commit each validated checkpoint and only then start benchmark comparisons against `bc`, `idm`, `pssidm`, and `lssidm`.

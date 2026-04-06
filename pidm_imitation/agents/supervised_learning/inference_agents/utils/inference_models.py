@@ -24,6 +24,24 @@ from pidm_imitation.constants import (
 )
 
 
+def select_rollout_action(predicted_action: Tensor) -> Tensor:
+    """
+    Convert a model prediction into the single action to execute at rollout time.
+    Sequence-valued policies use the last/current action in the predicted window.
+    """
+    if predicted_action.ndim == 3:
+        return predicted_action[:, -1, :]
+    if predicted_action.ndim == 2:
+        return predicted_action
+    if predicted_action.ndim == 1:
+        return predicted_action.unsqueeze(0)
+    raise ValueError(
+        "Expected predicted action to have shape (batch, seq, action_dim), "
+        "(batch, action_dim), or (action_dim,). "
+        f"Got shape {tuple(predicted_action.shape)}."
+    )
+
+
 class SlidingWindowInferenceModel(nn.Module):
     """
     Pytorch model class that wraps a model trained on sliding windows of observations and actions
@@ -58,6 +76,7 @@ class SlidingWindowInferenceModel(nn.Module):
     def forward(self, state: Tensor, action: Tensor) -> Tensor:
         inputs = self.get_inputs(state, action)
         action = self.action_regressor.forward_policy_path(inputs)[PREDICTED_ACTION_KEY]
+        action = select_rollout_action(action)
         action = self.action_handler.process_predicted_action(action)
         return action.flatten()
 
@@ -130,6 +149,7 @@ class SlidingWindowInferenceIdmModel(nn.Module):
 
         inputs = self.get_inputs(state, action, lookahead, lookahead_action)
         action = self.action_regressor.forward_policy_path(inputs)[PREDICTED_ACTION_KEY]
+        action = select_rollout_action(action)
         action = self.action_handler.process_predicted_action(action)
         return action.flatten()
 

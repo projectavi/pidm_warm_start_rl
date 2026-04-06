@@ -4,7 +4,9 @@
 class ValidPytorchAgents:
     IDM = "idm"
     BC = "bc"
-    ALL = [IDM, BC]
+    PSSIDM = "pssidm"
+    LSSIDM = "lssidm"
+    ALL = [IDM, BC, PSSIDM, LSSIDM]
 
     @staticmethod
     def is_pytorch_agent(agent_name: str) -> bool:

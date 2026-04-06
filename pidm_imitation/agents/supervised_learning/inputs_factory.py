@@ -160,6 +160,34 @@ class InputsFactory:
             )
 
     @staticmethod
+    def _get_ssidm_inputs(config: OfflinePLConfigFile) -> Dict[str, Tuple[str, Any]]:
+        input_format = ExtractArgsFromConfig.get_input_format(config)
+        model_config = ExtractArgsFromConfig.get_model_config(config)
+        submodel_names = ExtractArgsFromConfig.get_submodel_names_from_model_config(
+            model_config
+        )
+
+        if STATE_ENCODER_MODEL_KEY in submodel_names:
+            raise ValueError(
+                "PSSIDM/LSSIDM use a shared SSIDM policy implementation and do not "
+                "support the external repo state_encoder submodel. Put any latent "
+                "encoding inside SSIDMPolicyNetwork instead."
+            )
+
+        if input_format != ValidInputFormats.STATE_ONLY:
+            raise ValueError(
+                f"Invalid input format '{input_format}' for SSIDM model. "
+                f"Expected '{ValidInputFormats.STATE_ONLY}'."
+            )
+
+        return {
+            POLICY_HEAD_KEY: (
+                "input_keys",
+                [STATE_HISTORY_KEY, STATE_LOOKAHEAD_KEY],
+            ),
+        }
+
+    @staticmethod
     def get_inputs(config: OfflinePLConfigFile) -> Dict[str, Tuple[str, Any]]:
         """
         Get the input groups for the state encoder from the config.
@@ -176,6 +204,8 @@ class InputsFactory:
             inputs = InputsFactory._get_bc_inputs(config)
         elif algorithm_name == ValidModels.IDM:
             inputs = InputsFactory._get_idm_inputs(config)
+        elif algorithm_name in [ValidModels.PSSIDM, ValidModels.LSSIDM]:
+            inputs = InputsFactory._get_ssidm_inputs(config)
         else:
             raise ValueError(
                 f"Invalid algorithm '{algorithm_name}' in config. Expected one of {ValidModels.ALL}."

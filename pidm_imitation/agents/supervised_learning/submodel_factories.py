@@ -7,6 +7,7 @@ from torch import nn
 
 from pidm_imitation.agents.models.network_block import NetworkBlock
 from pidm_imitation.agents.models.policy_models import PolicyNetwork
+from pidm_imitation.agents.models.ssidm import SSIDMPolicyNetwork
 from pidm_imitation.agents.supervised_learning.base_models import Head
 from pidm_imitation.agents.supervised_learning.extract_args_utils import (
     ExtractArgsFromConfig,
@@ -18,6 +19,7 @@ from pidm_imitation.agents.supervised_learning.submodels.state_encoder_model imp
 from pidm_imitation.agents.supervised_learning.utils.action_loss import ActionLoss
 from pidm_imitation.agents.supervised_learning.utils.utils import get_total_dim
 from pidm_imitation.configs.config_offline_pl import OfflinePLConfigFile
+from pidm_imitation.utils.valid_models import ValidModels
 
 
 class BaseModelFactory:
@@ -189,12 +191,15 @@ class PolicyModelFactory:
     """
 
     POLICY_NETWORK = "PolicyNetwork"
-    VALID_POLICY_MODELS = [POLICY_NETWORK]
+    SSIDM_POLICY_NETWORK = "SSIDMPolicyNetwork"
+    VALID_POLICY_MODELS = [POLICY_NETWORK, SSIDM_POLICY_NETWORK]
 
     @staticmethod
     def _get_policy_model_class(class_name: str) -> type:
         if class_name == PolicyModelFactory.POLICY_NETWORK:
             return PolicyNetwork
+        if class_name == PolicyModelFactory.SSIDM_POLICY_NETWORK:
+            return SSIDMPolicyNetwork
         raise ValueError(
             f"Invalid policy model {class_name}, must be one of {PolicyModelFactory.VALID_POLICY_MODELS}"
         )
@@ -230,6 +235,27 @@ class PolicyModelFactory:
             return {
                 "base_model": base_model,
                 "action_type": action_type,
+            }
+        if class_name == PolicyModelFactory.SSIDM_POLICY_NETWORK:
+            input_dim = BaseModelFactory._get_input_dim(
+                config=config,
+                input_keys=input_keys,
+                state_dim=state_dim,
+                state_encoder_dim=state_encoder_dim,
+                state_encoder_collapse_sequence=state_encoder_collapse_sequence,
+                collapse_sequence=False,
+            )
+            policy_model_kwargs = (
+                ExtractArgsFromConfig.get_policy_head_policy_model_init_args(config)
+            )
+            return {
+                **policy_model_kwargs,
+                "input_dim": input_dim,
+                "state_dim": state_dim,
+                "action_type": ExtractArgsFromConfig.get_action_type(config),
+                "use_latent_encoder": (
+                    ExtractArgsFromConfig.get_algorithm(config) == ValidModels.LSSIDM
+                ),
             }
         raise ValueError(
             f"Unknown policy model: {class_name}, must be one of {PolicyModelFactory.VALID_POLICY_MODELS}"

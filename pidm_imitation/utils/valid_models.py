@@ -4,7 +4,9 @@
 class ValidModels:
     BC = "bc"
     IDM = "idm"
-    ALL = [BC, IDM]
+    PSSIDM = "pssidm"
+    LSSIDM = "lssidm"
+    ALL = [BC, IDM, PSSIDM, LSSIDM]
 
     @staticmethod
     def is_valid_model(model_name: str) -> bool:

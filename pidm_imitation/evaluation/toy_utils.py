@@ -15,7 +15,11 @@ def create_toy_config_parser(
     agent_name: str,
 ) -> ToyPLConfigFile:
     config: ConfigFile
-    if agent_name in [ValidToyAgents.TOY_IDM]:
+    if agent_name in [
+        ValidToyAgents.TOY_IDM,
+        ValidToyAgents.TOY_PSSIDM,
+        ValidToyAgents.TOY_LSSIDM,
+    ]:
         config = ToyIDMConfigFile(config_path)
     elif agent_name == ValidToyAgents.TOY_BC:
         config = ToyBCConfigFile(config_path)

@@ -10,6 +10,7 @@ from pidm_imitation.agents.supervised_learning.extract_args_utils import (
     ExtractArgsFromDataModule,
 )
 from pidm_imitation.agents.supervised_learning.inputs_factory import InputsFactory
+from pidm_imitation.agents.models.ssidm import SSIDMPolicyNetwork
 from pidm_imitation.agents.supervised_learning.single_head_model import (
     SingleHeadActionRegressor,
 )
@@ -33,6 +34,10 @@ log = Logger().get_root_logger()
 
 
 class ModelFactory:
+    @staticmethod
+    def _is_ssidm_algorithm(alg: str) -> bool:
+        return alg in [ValidModels.PSSIDM, ValidModels.LSSIDM]
+
     @staticmethod
     def _get_base_kwargs_and_dims(
         config: OfflinePLConfigFile, datamodule: DataModule
@@ -109,6 +114,8 @@ class ModelFactory:
             return SingleHeadActionRegressor
         if alg == ValidModels.IDM:
             return SingleHeadActionRegressor
+        if ModelFactory._is_ssidm_algorithm(alg):
+            return SingleHeadActionRegressor
         raise ValueError(
             f"Unsupported algorithm '{alg}'. Supported algorithms are {ValidModels.ALL}."
         )
@@ -133,7 +140,9 @@ class ModelFactory:
         ModelFactory._add_input_keys(config)
 
         # Singlehead architecture
-        if alg == ValidModels.BC or alg == ValidModels.IDM:
+        if alg in [ValidModels.BC, ValidModels.IDM] or ModelFactory._is_ssidm_algorithm(
+            alg
+        ):
             return ModelFactory._get_singlehead_kwargs(config, datamodule)
 
         raise ValueError(
@@ -149,6 +158,10 @@ class ModelFactory:
         return {POLICY_HEAD_KEY}, {POLICY_HEAD_KEY, STATE_ENCODER_MODEL_KEY}
 
     @staticmethod
+    def _get_ssidm_required_and_valid_submodels() -> Tuple[Set[str], Set[str]]:
+        return {POLICY_HEAD_KEY}, {POLICY_HEAD_KEY}
+
+    @staticmethod
     def assert_required_and_valid_submodels(config: OfflinePLConfigFile):
         algorithm_name = ExtractArgsFromConfig.get_algorithm(config)
         model_config = ExtractArgsFromConfig.get_model_config(config)
@@ -159,6 +172,8 @@ class ModelFactory:
             required, valid = ModelFactory._get_bc_required_and_valid_submodels()
         elif algorithm_name == ValidModels.IDM:
             required, valid = ModelFactory._get_idm_required_and_valid_submodels()
+        elif ModelFactory._is_ssidm_algorithm(algorithm_name):
+            required, valid = ModelFactory._get_ssidm_required_and_valid_submodels()
         else:
             raise ValueError(
                 f"Unsupported algorithm '{algorithm_name}'. Supported algorithms are {ValidModels.ALL}."
@@ -195,6 +210,24 @@ class ModelFactory:
                 f"is at or before the last action target for given history {history} and lookahead slice "
                 f"{datamodule.lookahead_slice}. This can leak action targets into the model input! Please ensure that "
                 "the first lookahead input is after the last action target."
+            )
+
+        if isinstance(model.policy_head.policy_model, SSIDMPolicyNetwork):
+            assert (
+                datamodule.lookahead
+            ), "PSSIDM/LSSIDM require lookahead data, but datamodule lookahead is disabled."
+            assert len(datamodule.lookahead_slice) == 1, (
+                "PSSIDM/LSSIDM currently require a single fixed lookahead slice. "
+                f"Got {datamodule.lookahead_slice}."
+            )
+            assert datamodule.lookahead_slice[0] == 0, (
+                "PSSIDM/LSSIDM scaffold expects next-state lookahead semantics "
+                "(repo lookahead_k = 0). "
+                f"Got {datamodule.lookahead_slice}."
+            )
+            assert not datamodule.include_k, (
+                "PSSIDM/LSSIDM scaffold expects include_k = False because the "
+                "strict fixed-horizon core should not consume lookahead_k inputs."
             )
 
     @staticmethod

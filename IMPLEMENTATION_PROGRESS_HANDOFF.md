@@ -16,12 +16,41 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 ## Current Snapshot
 
 - Last updated: 2026-04-06
-- Status: idle
-- Active request: none
-- Current objective: wait for the next user task
-- Files in progress: none
-- Blockers: none
-- Next step: on the next implementation request, replace this snapshot with the active task, planned files, progress notes, and validation status
+- Status: in_progress
+- Active request: scaffold `pssidm` and `lssidm` integration into the supervised-learning stack
+- Current objective: finish the first shared scaffold checkpoint so the new algorithms are registered, constructible, and able to pass sequence-shaped data through training and inference entrypoints
+- Files in progress:
+  - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
+  - `ssidm_integration_plan.md`
+  - `configs/supervised_learning/pssidm_example.yaml`
+  - `configs/supervised_learning/lssidm_example.yaml`
+  - `pidm_imitation/utils/valid_models.py`
+  - `pidm_imitation/agents/supervised_learning/model_factory.py`
+  - `pidm_imitation/agents/supervised_learning/inputs_factory.py`
+  - `pidm_imitation/agents/supervised_learning/inference_agents/pytorch_valid_agents.py`
+  - `pidm_imitation/agents/supervised_learning/inference_agents/pytorch_agents_factory.py`
+  - `pidm_imitation/agents/supervised_learning/inference_agents/utils/inference_models.py`
+  - `pidm_imitation/evaluation/toy_valid_agents.py`
+  - `pidm_imitation/agents/models/policy_models.py`
+  - `pidm_imitation/agents/supervised_learning/submodel_factories.py`
+  - `pidm_imitation/agents/models/ssidm.py`
+- Decisions:
+  - `pssidm` and `lssidm` stay as separate registered algorithms but share one underlying SSIDM implementation.
+  - The first checkpoint is scaffold-first: method signatures, registrations, placeholder shared model behavior, and rollout adapter before real SSM math.
+  - Strict `pssidm` uses fixed next-state lookahead via the repo's existing single-slice lookahead configuration and does not use `lookahead_k_onehot` as a core input.
+  - `lssidm` keeps the same scaffold but activates an internal shared latent encoder so the intended training decomposition is "encode in parallel, then convolve."
+- Validation:
+  - `python3 -m compileall pidm_imitation configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml IMPLEMENTATION_PROGRESS_HANDOFF.md ssidm_integration_plan.md`
+  - local Python runtime check:
+    - loaded `configs/supervised_learning/pssidm_example.yaml` via toy config parser
+    - loaded `configs/supervised_learning/lssidm_example.yaml` via toy config parser
+    - verified both route `state_history` and `state_lookahead` into the policy head
+    - instantiated both models through `ModelFactory`
+    - verified both return predicted actions with shape `(batch, seq, action_dim)`
+- Blockers:
+  - none
+- Next step:
+  - review the final scaffold diff, commit the checkpoint, and then begin replacing scaffold internals with the real shared SSIDM components
 
 ## Recent Completed Work
 
@@ -32,6 +61,10 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - install, training, evaluation, and toy-environment entry points
   - guardrails for generated artifacts and generated config files
   - validation guidance for a repo without a dedicated test suite
+- Drafted and iteratively revised `ssidm_integration_plan.md`:
+  - moved from a single `ssidm` mode to separate `pssidm` and `lssidm`
+  - aligned the plan with strict raw-state `pssidm` semantics and a shared-implementation `lssidm` extension
+  - fixed the repo-specific lookahead mapping so version 1 uses fixed next-state reference via the existing data config
 
 ## Worktree Notes
 

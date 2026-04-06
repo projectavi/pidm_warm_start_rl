@@ -47,7 +47,11 @@ class PytorchAgentFactory:
             if model.is_recurrent:
                 return PytorchAgent
             return PytorchSlidingWindowAgent
-        if agent_name == ValidPytorchAgents.IDM:
+        if agent_name in [
+            ValidPytorchAgents.IDM,
+            ValidPytorchAgents.PSSIDM,
+            ValidPytorchAgents.LSSIDM,
+        ]:
             if model.is_recurrent:
                 return PytorchIdmAgent
             return PytorchSlidingWindowIdmAgent
@@ -95,7 +99,11 @@ class PytorchAgentFactory:
             "model_path": model_path,
             "observation_handler": observation_handler,
         }
-        if agent_name == ValidPytorchAgents.IDM:
+        if agent_name in [
+            ValidPytorchAgents.IDM,
+            ValidPytorchAgents.PSSIDM,
+            ValidPytorchAgents.LSSIDM,
+        ]:
             agent_args["idm_planner"] = PytorchAgentFactory._get_idm_planner(
                 config=config,
                 data_hparams=data_hparams,

@@ -1,0 +1,116 @@
+experiment_name: &experiment_name <ENV>_<NUM_TRAIN_SAMPLES>_states_bc_seed_<SEED>
+
+state:
+  type: states
+
+action:
+  type: left_stick
+
+reference_trajectory:
+  video: input_trajectories/{train[0]}_video.mp4
+  inputs: input_trajectories/{train[0]}_inputs.json
+
+agent:
+  type: toy_bc
+  seed: <SEED>
+
+pytorch_lightning:
+  seed_everything: <SEED>
+  trainer:
+    strategy: auto
+    accelerator: gpu
+    gradient_clip_algorithm: norm
+    gradient_clip_val: 1.0
+    enable_checkpointing: true
+    enable_progress_bar: true
+    enable_model_summary: true
+    max_steps: 10000
+    check_val_every_n_epoch: 10
+  optimizer: adam
+  optimizer_kwargs:
+    lr: 0.001
+  scheduler: torch.optim.lr_scheduler.LinearLR
+  scheduler_kwargs:
+      start_factor: 1.0
+      end_factor: 0.001
+      total_iters: 50000
+
+callbacks:
+  checkpoint_callback: true
+  checkpoint_callback_kwargs:
+    save_top_k: -1      # save all
+    every_n_epochs: 0
+    every_n_train_steps: 100
+    every_n_steps_custom:
+      classname: exponential
+      init_args:
+        every_n_train_steps: 50
+        increase_power: 10
+        increase_on_n_steps: 100
+    filename: '{step}'
+    verbose: false
+    save_last: true
+    save_on_train_epoch_end: true
+    dirpath: checkpoints/<ENV>_<NUM_TRAIN_SAMPLES>_samples_seed_<SEED>_bc
+
+data:
+  train_data_dir: $REPO_DIRECTORY/datasets/<ENV_FULL>/
+  num_train_samples: <NUM_TRAIN_SAMPLES>
+  num_validation_samples: <NUM_VALIDATION_SAMPLES>
+  shuffle_trajectories: true
+  batch_size: <BATCH_SIZE>
+  num_workers: <NUM_WORKERS>
+  history: 0
+  history_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 0
+  padding_strategy: repeat
+  alignment_strategy: causal_action_frame_alignment
+
+model:
+  algorithm: bc
+  input_format: state_only
+  submodels:
+    state_encoder:
+      class_name: StateEncoder
+      init_args:
+        encoder_model:
+          class_name: NetworkBlock
+          init_args:
+            network_config:
+              - type: linear
+                size: 512
+                num_layers: 1
+              - type: relu
+              - type: linear
+                size: 1024
+                num_layers: 1
+              - type: relu
+              - type: linear
+                size: 256
+                num_layers: 1
+              - type: relu
+              - type: batch_norm
+
+    policy_head:
+      class_name: PolicyHead
+      init_args:
+        policy_model:
+          class_name: PolicyNetwork
+          init_args:
+            base_model:
+              class_name: NetworkBlock
+              init_args:
+                network_config:
+                  - type: linear
+                    size: 256
+                    num_layers: 1
+                  - type: relu
+                collapse_sequence: true
+        action_loss:
+          continuous_loss: l1
+
+wandb:
+  project: pidm-repro
+  train_group: <ENV>_bc
+  train_name: <ENV>_<NUM_TRAIN_SAMPLES>_bc_seed_<SEED>

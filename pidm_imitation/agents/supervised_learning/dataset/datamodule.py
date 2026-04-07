@@ -7,6 +7,7 @@ import random
 from typing import Any, Dict, List, Tuple
 
 import lightning.pytorch as pl
+import torch
 from torch.utils.data import DataLoader
 
 from pidm_imitation.agents.supervised_learning.dataset.align_dataset.alignment_strategy import (
@@ -377,23 +378,30 @@ class DataModule(pl.LightningDataModule):
             log.info(f"Setting up training data on rank {self.trainer.global_rank}...")
             self._initialize_data()
 
+    def _build_dataloader_kwargs(self, shuffle: bool) -> Dict[str, Any]:
+        # Keep a few pinned batches staged so GPU copies do not sit idle behind Python workers.
+        dataloader_kwargs: Dict[str, Any] = {
+            "batch_size": self.batch_size,
+            "shuffle": shuffle,
+            "num_workers": self.num_workers,
+            "pin_memory": torch.cuda.is_available(),
+            "persistent_workers": self.num_workers > 0,
+        }
+        if self.num_workers > 0:
+            dataloader_kwargs["prefetch_factor"] = 4
+        return dataloader_kwargs
+
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            persistent_workers=True,
+            **self._build_dataloader_kwargs(shuffle=True),
         )
 
     def val_dataloader(self):
         return (
             DataLoader(
                 self.validation_dataset,
-                batch_size=self.batch_size,
-                shuffle=False,
-                num_workers=self.num_workers,
-                persistent_workers=True,
+                **self._build_dataloader_kwargs(shuffle=False),
             )
             if self.validation_dataset
             else []

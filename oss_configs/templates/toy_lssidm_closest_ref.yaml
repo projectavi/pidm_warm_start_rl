@@ -1,0 +1,98 @@
+experiment_name: &experiment_name <ENV>_<NUM_TRAIN_SAMPLES>_states_lssidm_seed_<SEED>
+
+state:
+  type: states
+
+action:
+  type: left_stick
+
+reference_trajectory:
+  video: input_trajectories/{train[0]}_video.mp4
+  inputs: input_trajectories/{train[0]}_inputs.json
+
+agent:
+  type: toy_lssidm
+  seed: <SEED>
+  planner_type: closest_reference
+  idm_planner:
+    eval_lookahead_type: fixed
+    eval_lookahead: 0
+    planner_kwargs:
+      distance_measure: l2
+      masking_conditions:
+        - ["toy_same_goal", {}]
+
+pytorch_lightning:
+  seed_everything: <SEED>
+  trainer:
+    strategy: auto
+    accelerator: gpu
+    enable_checkpointing: true
+    enable_progress_bar: true
+    enable_model_summary: true
+    max_steps: 100000
+    check_val_every_n_epoch: 10
+  optimizer: adam
+  optimizer_kwargs:
+    lr: 0.00001
+
+callbacks:
+  checkpoint_callback: true
+  checkpoint_callback_kwargs:
+    save_top_k: -1
+    every_n_epochs: 0
+    every_n_train_steps: 100
+    every_n_steps_custom:
+      classname: exponential
+      init_args:
+        every_n_train_steps: 50
+        increase_power: 10
+        increase_on_n_steps: 100
+    filename: '{step}'
+    verbose: false
+    save_last: true
+    save_on_train_epoch_end: true
+    dirpath: checkpoints/<ENV>_<NUM_TRAIN_SAMPLES>_samples_seed_<SEED>_lssidm
+
+data:
+  train_data_dir: $REPO_DIRECTORY/datasets/<ENV_FULL>/
+  num_train_samples: <NUM_TRAIN_SAMPLES>
+  num_validation_samples: <NUM_VALIDATION_SAMPLES>
+  shuffle_trajectories: true
+  batch_size: <BATCH_SIZE>
+  num_workers: <NUM_WORKERS>
+  history: 0
+  history_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 0
+  lookahead: 1
+  lookahead_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 1
+  include_k: false
+  padding_strategy: repeat
+  alignment_strategy: causal_action_frame_alignment
+
+model:
+  algorithm: lssidm
+  input_format: state_only
+  submodels:
+    policy_head:
+      class_name: PolicyHead
+      init_args:
+        policy_model:
+          class_name: SSIDMPolicyNetwork
+          init_args:
+            d_model: 128
+            num_ssm_layers: 4
+            ssm_state_dim: 128
+            hippo_init: true
+            diagonal_A: true
+            latent_encoder_dim: 128
+        action_loss:
+          continuous_loss: l1
+
+wandb:
+  project: pidm-repro
+  train_group: <ENV>_lssidm
+  train_name: <ENV>_<NUM_TRAIN_SAMPLES>_lssidm_seed_<SEED>

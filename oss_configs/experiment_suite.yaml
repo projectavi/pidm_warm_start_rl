@@ -1,0 +1,59 @@
+config_dir: toy_configs
+results_dir: results
+template_values:
+  BATCH_SIZE: 4096
+  NUM_WORKERS: 1
+num_train_samples:
+  - 1
+  - 2
+  - 5
+  - 10
+  - 20
+  - 30
+  - 40
+  - 50
+validation_samples:
+  default: 10
+  overrides:
+    "50": 0
+seeds:
+  start: 0
+  stop: 20
+environments:
+  multiroom:
+    display_name: Multiroom
+    dataset_name: multiroom_human_data
+    toy_config: configs/toy_env/toy_env_multiroom.yaml
+  four_room:
+    display_name: Four Room
+    dataset_name: four_room_human_data
+    toy_config: configs/toy_env/toy_env_four_room.yaml
+  maze:
+    display_name: Maze
+    dataset_name: maze_human_data
+    toy_config: configs/toy_env/toy_env_large_maze.yaml
+  zigzag:
+    display_name: Zigzag
+    dataset_name: zigzag_human_data
+    toy_config: configs/toy_env/toy_env_zigzag.yaml
+methods:
+  bc:
+    display_name: BC
+    eval_agent: toy_bc
+    template_by_env:
+      multiroom: templates/toy_bc_multiroom.yaml
+      four_room: templates/toy_bc_four_room.yaml
+      maze: templates/toy_bc_maze.yaml
+      zigzag: templates/toy_bc_zigzag.yaml
+  idm:
+    display_name: PIDM
+    eval_agent: toy_idm
+    template: templates/toy_idm_closest_ref.yaml
+  pssidm:
+    display_name: SSIDM
+    eval_agent: toy_pssidm
+    template: templates/toy_pssidm_closest_ref.yaml
+  lssidm:
+    display_name: Latent SSIDM
+    eval_agent: toy_lssidm
+    template: templates/toy_lssidm_closest_ref.yaml

@@ -94,15 +94,21 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
     - confirmed:
       - nonlinear prenorm variants load from checkpoints
       - nonlinear recurrent rollout completes for both `pssidm` and `lssidm`
-- orchestrator validation:
+  - orchestrator validation:
   - `python3 -m compileall experiments/orchestrator.py experiments/README.md`
   - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --only_job nonlinear-smokes --dry_run`
   - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --only_job four-room-baselines --dry_run`
-  - confirmed:
-    - direct-config jobs expand to the expected six nonlinear SSIDM smoke runs
-    - manifest jobs expand to the expected filtered `bc` / `idm` / `pssidm` / `lssidm` suite subset
-    - `--only_job` now isolates plan sections before expansion
-    - the scheduler surfaces the intended GPU-slot model in dry-run output
+    - confirmed:
+      - direct-config jobs expand to the expected six nonlinear SSIDM smoke runs
+      - manifest jobs expand to the expected filtered `bc` / `idm` / `pssidm` / `lssidm` suite subset
+      - `--only_job` now isolates plan sections before expansion
+      - the scheduler surfaces the intended GPU-slot model in dry-run output
+  - parallel-safe baseline smoke config validation:
+    - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --only_job nonlinear-all-test --dry_run`
+    - confirmed:
+      - direct-config baseline entries now use `configs/supervised_learning/bc_smoke.yaml` and `configs/supervised_learning/pidm_smoke.yaml`
+      - `bc` and `pidm` direct-config runs now resolve to unique checkpoint directories (`checkpoints/toy_bc_smoke` and `checkpoints/toy_pidm_smoke`)
+      - the direct comparison job is safe to run in parallel across its config entries
 - Blockers:
   - none
 - Next step:
@@ -124,6 +130,7 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - the new orchestrator workflow
   - the GPU-slot scheduling model
   - example commands for dry runs, job selection, and match filtering
+- Added `configs/supervised_learning/bc_smoke.yaml` and `configs/supervised_learning/pidm_smoke.yaml` so the direct-config comparison plan can include baseline `bc` and `pidm` runs without sharing a generic checkpoint directory.
 
 ### 2026-04-06
 

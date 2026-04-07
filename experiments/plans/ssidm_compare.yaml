@@ -12,15 +12,24 @@ defaults:
   gpus: [0, 1]
   slots_per_gpu: 2
   poll_interval: 1.0
-  output_root: outputs/orchestrator
+  output_root: outputs/orchestrator/first-run
   save_results: true
-  enable_wandb: false
+  force_train: false
+  enable_wandb: true
 
 jobs:
-  - name: nonlinear-smokes
+  - name: nonlinear-all-test
     episodes: 3
     force_eval: true
     configs:
+      - name: bc
+        path: configs/supervised_learning/bc_example.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_bc
+      - name: pidm
+        path: configs/supervised_learning/pidm_example.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_idm
       - name: pssidm/linear
         path: configs/supervised_learning/pssidm_smoke.yaml
         toy_config: configs/toy_env/toy_env_four_room.yaml

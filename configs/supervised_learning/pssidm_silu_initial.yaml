@@ -89,7 +89,7 @@ model:
           init_args:
             d_model: 64
             num_ssm_layers: 3
-            ssm_state_dim: 64
+            ssm_state_dim: 157
             delta_init: 1.0
             hippo_init: true
             diagonal_A: true

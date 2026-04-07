@@ -17,23 +17,25 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 
 - Last updated: 2026-04-07
 - Status: in_progress
-- Active request: design a reusable experiment launcher that is easy to specify/extend, and supports parallel runs on a single GPU and across multiple GPUs
-- Current objective: finish and document a plan-file-based GPU-aware experiment orchestrator that supplements `experiments/runner.py`
+- Active request: resize the `*_initial` SSIDM comparison configs so `lssidm` uses the same encoder as PIDM, then mirror the tuned SSM core settings into the `pssidm` variants
+- Current objective: support a PIDM-sized internal latent encoder in `lssidm`, tune the remaining SSM core budget, and validate the resulting parameter counts against `bc` / `pidm`
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
-  - `experiments/orchestrator.py`
-  - `experiments/README.md`
-  - `experiments/plans/ssidm_compare.yaml`
+  - `pidm_imitation/agents/models/ssidm.py`
+  - `configs/supervised_learning/pssidm_initial.yaml`
+  - `configs/supervised_learning/pssidm_silu_initial.yaml`
+  - `configs/supervised_learning/pssidm_silu_prenorm_initial.yaml`
+  - `configs/supervised_learning/lssidm_initial.yaml`
+  - `configs/supervised_learning/lssidm_silu_initial.yaml`
+  - `configs/supervised_learning/lssidm_silu_prenorm_initial.yaml`
 - Decisions:
-  - `experiments/runner.py` remains the suite-first path; the new orchestration surface should supplement it rather than replacing it.
-  - The new script should support two job kinds:
-    - direct `configs` jobs for ad-hoc hand-picked runs
-    - `manifest` jobs for suite-generated experiment subsets
-  - GPU scheduling is modeled as `gpus x slots_per_gpu`, where each active subprocess gets its assigned `CUDA_VISIBLE_DEVICES`.
-  - The orchestrator should write a copied plan and a fully expanded `resolved_runs.json` so a finished run is reproducible.
-  - `--only_job` must prune jobs before expansion so a missing manifest in an unrelated plan section does not block direct-config runs.
-  - Existing checkpoints/results should be reused unless `force_train` / `force_eval` are set.
-  - The repository's `.gitignore` currently ignores the entire `experiments/` directory, so new files there need force-adding during commit unless the ignore policy changes later.
+  - `lssidm` now supports reusing the same encoder family as PIDM by accepting an internal `latent_encoder_network_config`, implemented with the repo's existing `NetworkBlock`.
+  - The PIDM-matched `lssidm` encoder uses the same `14 -> 512 -> 1024 -> 256 -> batch_norm` stack as the PIDM state encoder.
+  - To keep the total `lssidm` size near PIDM, the encoder output is shared-projected into an SSM width of `d_model = 64`, and the remaining budget is assigned to a `3`-layer SSM core with `ssm_state_dim = 157`.
+  - The `pssidm` initial variants copy that tuned SSM core structure exactly:
+    - `d_model = 64`
+    - `num_ssm_layers = 3`
+    - `ssm_state_dim = 157`
 - Validation:
   - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
   - committed scaffold handoff checkpoint: `754906b` (`Update SSIDM scaffold handoff`)
@@ -109,10 +111,22 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
       - direct-config baseline entries now use `configs/supervised_learning/bc_smoke.yaml` and `configs/supervised_learning/pidm_smoke.yaml`
       - `bc` and `pidm` direct-config runs now resolve to unique checkpoint directories (`checkpoints/toy_bc_smoke` and `checkpoints/toy_pidm_smoke`)
       - the direct comparison job is safe to run in parallel across its config entries
+  - SSIDM initial-size retune validation:
+    - `python3 -m compileall pidm_imitation/agents/models/ssidm.py configs/supervised_learning/pssidm_initial.yaml configs/supervised_learning/pssidm_silu_initial.yaml configs/supervised_learning/pssidm_silu_prenorm_initial.yaml configs/supervised_learning/lssidm_initial.yaml configs/supervised_learning/lssidm_silu_initial.yaml configs/supervised_learning/lssidm_silu_prenorm_initial.yaml`
+    - exact parameter-count check via config -> datamodule -> `ModelFactory.get_model(...)`
+    - confirmed totals:
+      - `bc_initial`: `862210`
+      - `pidm_initial`: `928002`
+      - `pssidm_initial`: `117532`
+      - `pssidm_silu_initial`: `117532`
+      - `pssidm_silu_prenorm_initial`: `117916`
+      - `lssidm_initial`: `927964`
+      - `lssidm_silu_initial`: `927964`
+      - `lssidm_silu_prenorm_initial`: `928348`
 - Blockers:
   - none
 - Next step:
-  - commit the new orchestrator files/docs, then use the plan surface to launch comparison batches
+  - if requested, update the experiment plan(s) to point at the resized `*_initial` configs rather than the smoke configs
 
 ## Recent Completed Work
 
@@ -137,6 +151,10 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - `eval_group: InitalComps`
   - `train_group: InitalComps`
   - matching `train_name`, `eval_name`, `experiment_name`, and checkpoint directory names
+- Retuned the SSIDM `*_initial` configs for a more meaningful size comparison:
+  - `lssidm` now uses a PIDM-matched internal encoder stack through `latent_encoder_network_config`
+  - `lssidm` total params are now essentially matched to PIDM (`~928k`)
+  - `pssidm` copies the same tuned SSM core structure while remaining encoder-free
 
 ### 2026-04-06
 

@@ -93,10 +93,12 @@ model:
         policy_model:
           class_name: SSIDMPolicyNetwork
           init_args:
+            d_model: 64
+            num_ssm_layers: 3
             ssm_state_dim: 64
             delta_init: 1.0
             hippo_init: true
             diagonal_A: true
-            latent_encoder_dim: 128
+            latent_encoder_dim: 64
         action_loss:
           continuous_loss: l1

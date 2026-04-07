@@ -15,57 +15,62 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 
 ## Current Snapshot
 
-- Last updated: 2026-04-06
+- Last updated: 2026-04-07
 - Status: in_progress
-- Active request: finish validating `pssidm` and `lssidm` end to end and keep the SSIDM implementation aligned with the plan and repo comparison path
-- Current objective: land the smoke-tested training and rollout path, record the recurrent planner-shape fix, and prepare the next phase of comparison-oriented cleanup and benchmarking
+- Active request: implement the stacked structured-block SSIDM backbone, keep progress/commits current, and preserve the mathematical framework of the brief while scaling expressiveness through structured composition
+- Current objective: complete the stacked-block transition for `pssidm` and `lssidm`, validate full-stack recurrent/convolution parity and repo wiring, and then move to refreshed smoke/benchmark runs
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
+  - `pidm_imitation/agents/models/ssidm.py`
   - `configs/supervised_learning/pssidm_example.yaml`
   - `configs/supervised_learning/lssidm_example.yaml`
   - `configs/supervised_learning/pssidm_smoke.yaml`
   - `configs/supervised_learning/lssidm_smoke.yaml`
-  - `pidm_imitation/agents/supervised_learning/inference_agents/pytorch_agents.py`
+  - `oss_configs/templates/toy_pssidm_closest_ref.yaml`
+  - `oss_configs/templates/toy_lssidm_closest_ref.yaml`
+  - `oss_configs/templates/toy_pssidm_closest_ref_small.yaml`
+  - `oss_configs/templates/toy_lssidm_closest_ref_small.yaml`
+  - `ssidm_integration_plan.md`
+  - `tests/test_ssidm_core.py`
   - `tests/test_ssidm_integration.py`
 - Decisions:
   - `pssidm` and `lssidm` stay as separate registered algorithms but share one underlying SSIDM implementation.
-  - The first checkpoint is scaffold-first: method signatures, registrations, placeholder shared model behavior, and rollout adapter before real SSM math.
   - Strict `pssidm` uses fixed next-state lookahead via the repo's existing single-slice lookahead configuration and does not use `lookahead_k_onehot` as a core input.
-  - `lssidm` keeps the same scaffold but activates an internal shared latent encoder so the intended training decomposition is "encode in parallel, then convolve."
+  - `lssidm` keeps the same shared SSIDM backbone but activates an internal shared timestep-wise latent encoder so the intended training decomposition is "encode in parallel, then convolve."
   - Example configs should use nontrivial sequence windows; `history: 7` is now the default in both SSIDM example configs so the sequence model is actually exercised.
   - Smoke configs stay separate from the example configs to keep fast end-to-end validation isolated from longer benchmark runs.
+  - SSIDM scaling now proceeds through structured composition rather than through a large generic front-end: `d_model` and `num_ssm_layers` are the main new knobs.
+  - The new backbone is a residual stack of structured SSM blocks. Each block preserves the same convolutional training / recurrent inference duality as the original single-block core.
+  - `pssidm` uses only a minimal per-timestep linear lift into `d_model`; `lssidm` uses a shared timestep-wise latent encoder before the same block stack.
+  - The earlier interrupted projection-heavy sizing direction has been removed from tracked code.
 - Validation:
-  - `python3 -m compileall pidm_imitation configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml IMPLEMENTATION_PROGRESS_HANDOFF.md ssidm_integration_plan.md`
-  - local Python runtime check:
-    - loaded `configs/supervised_learning/pssidm_example.yaml` via toy config parser
-    - loaded `configs/supervised_learning/lssidm_example.yaml` via toy config parser
-    - verified both route `state_history` and `state_lookahead` into the policy head
-    - instantiated both models through `ModelFactory`
-    - verified both return predicted actions with shape `(batch, seq, action_dim)`
   - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
-  - real-core validation:
-    - `python3 -m compileall pidm_imitation tests configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml`
+  - committed scaffold handoff checkpoint: `754906b` (`Update SSIDM scaffold handoff`)
+  - committed first real shared-core checkpoint: `48c0238` (`Implement shared SSIDM core`)
+  - committed end-to-end rollout checkpoint: `739334e` (`Validate SSIDM end-to-end rollout path`)
+  - committed documentation checkpoint: `1c22b33` (`Document SSIDM training and evaluation`)
+  - committed stacked structured-block checkpoint: `56ce7e6` (`Stack SSIDM structured blocks`)
+  - stacked-core validation:
     - `python3 -m unittest tests.test_ssidm_core -v`
+    - `python3 -m compileall pidm_imitation/agents/models/ssidm.py tests/test_ssidm_core.py`
+    - confirmed:
+      - full-stack eval stepping matches full-stack recurrent sequence mode
+      - full-stack convolution matches full-stack recurrent mode for stacked `pssidm`
+      - block cache reset clears every block cache in the stack
+  - stacked-wiring validation:
     - `python3 -m unittest tests.test_ssidm_core tests.test_ssidm_integration -v`
-    - local Python check confirmed:
-      - recurrent/convolution equivalence for `StructuredSSMCore` under random and HiPPO init
-      - `pssidm` and `lssidm` both instantiate through `ModelFactory` with the real SSIDM core
-      - both models now report `is_recurrent = True`
-      - training output shape `(batch, seq, action_dim)` and single-step eval output shape `(1, 1, action_dim)` remain correct
-  - smoke-train validation:
-    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/pssidm_smoke.yaml --new`
-    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/lssidm_smoke.yaml --new`
-    - both produced `last.ckpt` and `step=10.ckpt` in isolated checkpoint folders
-  - rollout / checkpoint-load validation:
-    - `python3 -m unittest tests.test_ssidm_core tests.test_ssidm_integration -v`
-    - `python3 -m compileall pidm_imitation tests configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml configs/supervised_learning/pssidm_smoke.yaml configs/supervised_learning/lssidm_smoke.yaml`
-    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/pssidm_smoke.yaml --agent toy_pssidm --checkpoint checkpoints/toy_pssidm_smoke/last.ckpt --episodes 1 --output_dir /tmp/ssidm_eval_pssidm`
-    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/lssidm_smoke.yaml --agent toy_lssidm --checkpoint checkpoints/toy_lssidm_smoke/last.ckpt --episodes 1 --output_dir /tmp/ssidm_eval_lssidm`
-    - both checkpoint loads succeeded and both one-episode toy rollouts completed successfully
+    - `python3 -m compileall pidm_imitation/agents/models/ssidm.py tests/test_ssidm_core.py tests/test_ssidm_integration.py configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml configs/supervised_learning/pssidm_smoke.yaml configs/supervised_learning/lssidm_smoke.yaml`
+    - confirmed:
+      - `pssidm` and `lssidm` example configs instantiate stacked models with `d_model = 64` and `num_ssm_layers = 3`
+      - repo input routing remains `state_history` + `state_lookahead`
+      - recurrent IDM planner input flattening regression remains fixed
+  - runner-template validation:
+    - `python3 -m oss_configs.generate_configs_human --suite oss_configs/experiment_suite.yaml --config_dir toy_configs_suite_stacked_check`
+    - generated all 2560 configs successfully after surfacing `d_model` / `num_ssm_layers` in the SSIDM suite templates and removing stale `latent_encoder_hidden_dims`
 - Blockers:
   - none
 - Next step:
-  - commit the smoke-validation phase, then move to comparison-readiness work: benchmark configs, longer runs against `bc`/`idm`, and any cleanup surfaced by those experiments
+  - commit the stacked-config/test/template checkpoint, then run refreshed train/load/eval smokes on the stacked models before moving to comparison-scale experiments
 
 ## Recent Completed Work
 

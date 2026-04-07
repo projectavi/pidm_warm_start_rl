@@ -71,6 +71,10 @@ class SSIDMIntegrationTests(unittest.TestCase):
         self.assertIsInstance(lssidm_model.policy_head.policy_model, SSIDMPolicyNetwork)
         self.assertFalse(pssidm_model.policy_head.policy_model.use_latent_encoder)
         self.assertTrue(lssidm_model.policy_head.policy_model.use_latent_encoder)
+        self.assertEqual(pssidm_model.policy_head.policy_model.d_model, 64)
+        self.assertEqual(lssidm_model.policy_head.policy_model.d_model, 64)
+        self.assertEqual(len(pssidm_model.policy_head.policy_model.blocks), 3)
+        self.assertEqual(len(lssidm_model.policy_head.policy_model.blocks), 3)
 
     def test_rollout_action_selection_uses_last_sequence_step(self):
         predicted = torch.tensor([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]])

@@ -1,0 +1,57 @@
+# Example orchestration plan for the GPU-aware experiment scheduler.
+#
+# Usage:
+#   python experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --dry_run
+#
+# Notes:
+# - The direct-config job works immediately.
+# - The manifest job assumes `toy_configs/manifest.json` already exists, e.g. from:
+#     python experiments/runner.py --skip_train --skip_eval --skip_plot
+
+defaults:
+  gpus: [0, 1]
+  slots_per_gpu: 2
+  poll_interval: 1.0
+  output_root: outputs/orchestrator
+  save_results: true
+  enable_wandb: false
+
+jobs:
+  - name: nonlinear-smokes
+    episodes: 3
+    force_eval: true
+    configs:
+      - name: pssidm/linear
+        path: configs/supervised_learning/pssidm_smoke.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_pssidm
+      - name: pssidm/silu
+        path: configs/supervised_learning/pssidm_silu_smoke.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_pssidm
+      - name: pssidm/silu-prenorm
+        path: configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_pssidm
+      - name: lssidm/linear
+        path: configs/supervised_learning/lssidm_smoke.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_lssidm
+      - name: lssidm/silu
+        path: configs/supervised_learning/lssidm_silu_smoke.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_lssidm
+      - name: lssidm/silu-prenorm
+        path: configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml
+        toy_config: configs/toy_env/toy_env_four_room.yaml
+        agent: toy_lssidm
+
+  - name: four-room-baselines
+    manifest: toy_configs/manifest.json
+    episodes: 10
+    force_eval: true
+    filters:
+      environments: [four_room]
+      methods: [bc, idm, pssidm, lssidm]
+      num_samples: [50]
+      seeds: [0, 1]

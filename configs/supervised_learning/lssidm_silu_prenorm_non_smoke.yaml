@@ -1,0 +1,101 @@
+experiment_name: toy_lssidm_silu_prenorm_non_smoke
+
+state:
+  type: states
+
+action:
+  type: left_stick
+
+reference_trajectory:
+  video: four_room_human_00_video.mp4
+  inputs: four_room_human_00_inputs.json
+
+agent:
+  type: toy_lssidm
+  seed: 5678
+  planner_type: closest_reference
+  idm_planner:
+    eval_lookahead_type: fixed
+    eval_lookahead: 0
+    planner_kwargs:
+      distance_measure: l2
+      masking_conditions:
+        - ["toy_same_goal", {}]
+
+wandb:
+  username: t-luschaefer
+  project: Lukas_Sandbox
+  eval_group: TestRuns
+  save_dir: ./logs
+  log_model: false
+  offline: true
+  train_name: toy_lssidm_silu_prenorm_non_smoke
+  eval_name: toy_lssidm_silu_prenorm_non_smoke/eval
+  train_group: TestRuns
+
+pytorch_lightning:
+  seed_everything: 5678
+  trainer:
+    strategy: auto
+    accelerator: gpu
+    enable_checkpointing: true
+    enable_progress_bar:
+    enable_model_summary: true
+    max_steps: 10000
+  optimizer: adam
+  optimizer_kwargs:
+    lr: 0.00001
+
+callbacks:
+  checkpoint_callback: true
+  checkpoint_callback_kwargs:
+    save_top_k: -1
+    every_n_epochs: 0
+    every_n_train_steps: 1000
+    filename: "{step}"
+    verbose: false
+    save_last: true
+    save_on_train_epoch_end: true
+    dirpath: checkpoints/toy_lssidm_silu_prenorm_non_smoke
+
+data:
+  train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/
+  num_train_samples: 16
+  num_validation_samples: 4
+  shuffle_trajectories: true
+  batch_size: 16
+  num_workers: 1
+  history: 7
+  history_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 7
+  lookahead: 1
+  lookahead_slice_specs:
+    class_name: LinearSlicer
+    num_samples: 1
+  include_k: false
+  padding_strategy: zero
+  alignment_strategy: causal_action_frame_alignment
+
+model:
+  algorithm: lssidm
+  input_format: state_only
+  submodels:
+    policy_head:
+      class_name: PolicyHead
+      init_args:
+        policy_model:
+          class_name: SSIDMPolicyNetwork
+          init_args:
+            d_model: 64
+            num_ssm_layers: 3
+            ssm_state_dim: 64
+            delta_init: 1.0
+            hippo_init: true
+            diagonal_A: true
+            block_nonlinearity: silu
+            prenorm: true
+            dropout: 0.0
+            latent_encoder_dim: 64
+        action_loss:
+          continuous_loss: l1

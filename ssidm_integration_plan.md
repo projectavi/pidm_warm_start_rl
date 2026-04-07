@@ -532,3 +532,294 @@ Optional in version 1 if time permits, but planned explicitly:
 10. Add a second example config and encoder-constraint tests.
 11. Run training and rollout smoke tests.
 12. Commit each validated checkpoint and only then start benchmark comparisons against `bc`, `idm`, `pssidm`, and `lssidm`.
+
+## Stacked Structured Block Addendum
+
+This addendum supersedes the earlier version-1 non-goal that excluded multi-layer stacked SSM blocks. The implementation direction is now: preserve the SSIDM mathematics, and increase expressiveness primarily through a stack of structured blocks rather than through a large generic front-end network.
+
+### Assumptions
+
+The following assumptions are fixed for the stacked design:
+
+1. `pssidm` remains the primary mathematical reference implementation.
+2. `pssidm` uses raw state coordinates as the semantic variables of the brief, up to at most a per-timestep linear lift into a common model width.
+3. `lssidm` remains a controlled extension in which the same SSIDM core operates in learned latent coordinates produced by a shared timestep-wise encoder.
+4. The future-reference horizon remains fixed through the existing repo lookahead configuration:
+   - single lookahead slice
+   - one-step future (`lookahead_k = 0` in repo semantics)
+   - `include_k = false`
+5. Training remains sequence-to-sequence using the full supervised window.
+6. Rollout remains recurrent and emits one action per environment step.
+7. The reference/planner remains external to the SSIDM model and is queried from the current online state at each environment step.
+8. For the strict `pssidm` path, no sequence-collapsing encoder, attention block, or generic pre-SSM history summarizer is allowed.
+9. Any optional normalization, dropout, or feedforward sublayers are deferred until after the exact stacked structured model is working and validated.
+
+### Why Stacking Is The Right Scaling Mechanism
+
+The scientific goal is to test whether the SSIDM mathematics is expressive enough to compete with existing PIDM baselines. If most additional capacity is placed in a large generic encoder, then positive results become ambiguous:
+
+- they may be caused by the generic encoder rather than by the structured inverse-dynamics formulation
+- the performance claim becomes harder to attribute to the SSIDM core
+- the comparison against PIDM shifts from "structured predictive inverse dynamics" to "another large neural network with an SSM head"
+
+Stacking structured blocks avoids that ambiguity. It increases expressiveness by composing the same mathematical object multiple times, so the added capacity still belongs to the SSIDM family.
+
+This also aligns with strong reference implementations of modern SSM models:
+
+- S4 scales through repeated layers and a model width `d_model`, rather than by making one single SSM enormous.
+- Mamba likewise treats the sequence mixer as one block inside a repeated residual backbone, with each block owning its own inference cache/state.
+
+The important design lesson is not "copy S4 or Mamba literally." The lesson is:
+
+- separate hidden model width from internal state-space dimension
+- scale through repeated structured blocks
+- keep recurrent state per block
+- preserve the same train-parallel / infer-recurrently split at every layer
+
+### Single-Block SSIDM Recap
+
+For the strict raw-state version, define:
+
+- executed state sequence: `u_t \in R^{d_u}`
+- future reference sequence: `u^*_t \in R^{d_r}`
+- combined input: `\tilde{u}_t = [u_t ; u^*_t] \in R^{d_u + d_r}`
+
+The brief-level continuous-time structured model is:
+
+`x'(t) = A x(t) + B \tilde{u}(t)`
+
+`y(t) = C x(t) + D \tilde{u}(t)`
+
+with `A` Hurwitz. Under zero-order hold with timestep `\Delta`, this becomes:
+
+`\bar{A} = exp(A \Delta)`
+
+`\bar{B} = \int_0^\Delta exp(A \tau) d\tau B`
+
+and the discrete recurrence is:
+
+`x_{t+1} = \bar{A} x_t + \bar{B} \tilde{u}_t`
+
+`y_t = C x_t + D \tilde{u}_t`
+
+If `x_0 = 0`, then the sequence output is the causal convolution:
+
+`y_t = \sum_{k=0}^t K_k \tilde{u}_{t-k}`
+
+where:
+
+`K_0 = C \bar{B} + D`
+
+`K_k = C \bar{A}^k \bar{B}` for `k >= 1`
+
+This is the mathematical reason the same model admits:
+
+- parallel sequence training through convolution/kernel application
+- recurrent rollout inference through the state update
+
+### Stacked Structured Blocks: Mathematical Construction
+
+The stacked design should preserve this property block by block.
+
+Introduce a hidden model width `d_model`. For `pssidm`, this width is reached by a minimal per-timestep linear lift:
+
+`h_t^{(0)} = P_u u_t`
+
+`r_t = P_r u^*_t`
+
+where `P_u \in R^{d_model \times d_u}` and `P_r \in R^{d_model \times d_r}` are learned linear maps.
+
+For `lssidm`, replace these linear lifts with a shared timestep-wise encoder `\phi`:
+
+`h_t^{(0)} = \phi(u_t)`
+
+`r_t = \phi(u^*_t)`
+
+The shared encoder must satisfy the following:
+
+- the same encoder is used for executed and reference streams
+- it is applied independently at each timestep
+- it does not collapse the sequence before the SSM stack
+
+Now define a stack of `L` structured blocks. For each layer `\ell = 1, ..., L`, define the block input:
+
+`z_t^{(\ell)} = [h_t^{(\ell-1)} ; r_t] \in R^{2 d_model}`
+
+Each block has its own continuous-time structured dynamics:
+
+`x'^{(\ell)}(t) = A^{(\ell)} x^{(\ell)}(t) + B^{(\ell)} z^{(\ell)}(t)`
+
+`\Delta h^{(\ell)}(t) = C^{(\ell)} x^{(\ell)}(t) + D^{(\ell)} z^{(\ell)}(t)`
+
+After discretization:
+
+`x_{t+1}^{(\ell)} = \bar{A}^{(\ell)} x_t^{(\ell)} + \bar{B}^{(\ell)} z_t^{(\ell)}`
+
+`\Delta h_t^{(\ell)} = C^{(\ell)} x_t^{(\ell)} + D^{(\ell)} z_t^{(\ell)}`
+
+and the residual update is:
+
+`h_t^{(\ell)} = h_t^{(\ell-1)} + \Delta h_t^{(\ell)}`
+
+Finally, the action head is applied to the final hidden sequence:
+
+`a_t = W_out h_t^{(L)} + b_out`
+
+### Why This Still Preserves The Framework
+
+This preserves the framework for `pssidm` in a stronger sense than a generic front-end MLP does.
+
+1. Each layer is itself a structured inverse-dynamics operator of exactly the same form as the single-block SSIDM.
+2. The recurrent rollout path is still explicit:
+   - each block stores its own recurrent state `x_t^{(\ell)}`
+   - each environment step applies the stack one block at a time
+3. The training path remains parallel at the layer level:
+   - for each block, the entire sequence can be processed through its convolutional/kernel form
+   - then passed to the next block
+
+For `pssidm`, if `P_u` and `P_r` are linear and there are no nonlinearities between blocks, then the entire stacked model remains a linear time-invariant system over an augmented state. To see this, define the global stacked state:
+
+`X_t = [x_t^{(1)} ; x_t^{(2)} ; ... ; x_t^{(L)}]`
+
+and note that each `h_t^{(\ell)}` is an affine linear function of:
+
+- the current block state `x_t^{(\ell)}`
+- the previous hidden `h_t^{(\ell-1)}`
+- the current reference `r_t`
+
+By substitution, the full stack can be written as a larger discrete linear system:
+
+`X_{t+1} = \mathcal{A} X_t + \mathcal{B} [u_t ; u^*_t]`
+
+`a_t = \mathcal{C} X_t + \mathcal{D} [u_t ; u^*_t]`
+
+for suitably constructed block-triangular matrices `\mathcal{A}, \mathcal{B}, \mathcal{C}, \mathcal{D}`.
+
+This matters because it shows that stacked `pssidm` is not merely "SSM-inspired." It is still exactly a structured state-space model, just with a larger composed state.
+
+For `lssidm`, the latent encoder introduces nonlinearity before the structured stack. That means the end-to-end map is no longer linear in raw state coordinates. However, conditioned on the latent sequence, the SSIDM backbone still preserves:
+
+- causal convolutional sequence training
+- recurrent stepwise inference
+- explicit per-block structured state evolution
+
+So `lssidm` remains a controlled extension, while `pssidm` remains the exact mathematical reference model.
+
+### Why The Reference Stream Must Be Injected At Every Layer
+
+The future reference should not be injected only once at the bottom of the stack. Injecting `r_t` at every layer is the cleaner design for predictive inverse dynamics.
+
+Reason:
+
+- the reference signal is not incidental context; it is part of the control law itself
+- deeper layers should be able to refine the action-relevant transformation while retaining direct access to the same future reference
+- if the reference is only supplied to the first layer, higher layers only see a transformed surrogate of the reference rather than the original control target
+
+So the block input should be `[hidden ; reference]` at every layer, not just at layer 1.
+
+### Parameterization And Scaling Rules
+
+The stacked design should introduce these explicit hyperparameters:
+
+- `d_model`: hidden width carried between blocks
+- `num_ssm_layers`: number of structured blocks
+- `ssm_state_dim`: internal state dimension of each block
+- optional `dropout`: default `0.0` in the exact first implementation
+- optional `prenorm`: default `false` in the exact first implementation
+
+The main scaling rule is:
+
+- increase expressiveness first through `num_ssm_layers`
+- then through `d_model`
+- then through `ssm_state_dim`
+
+Rationale:
+
+- `num_ssm_layers` directly increases compositional depth while preserving the block semantics
+- `d_model` increases the representational bandwidth of the hidden executed/reference interaction
+- `ssm_state_dim` increases the internal memory capacity of each block
+
+This separation mirrors successful SSM reference implementations, where model width and internal state size are not the same knob.
+
+### Recommended Version-1 Block Structure
+
+The first stacked implementation should stay mathematically strict:
+
+1. Per-timestep input lift:
+   - `pssidm`: linear only
+   - `lssidm`: shared timestep-wise encoder
+2. `L` repeated structured SSIDM blocks
+3. Residual addition after each block
+4. Final linear action head
+
+Do not add in the first stacked version:
+
+- feedforward MLP sublayers between blocks
+- gating mechanisms copied from unrelated sequence architectures
+- attention layers
+- sequence pooling before the structured stack
+
+These may improve performance later, but they would weaken the attribution of performance to the structured inverse-dynamics mathematics.
+
+### Convolution vs Recurrent Equivalence In The Stacked Model
+
+For a single block, equivalence is already required. For the stacked model, equivalence must hold at the full network level.
+
+That means the test should be:
+
+1. Run the full stacked model in sequence mode over a batch window.
+2. Run the same stacked model one step at a time using the recurrent cache of every block.
+3. Compare the full output sequences.
+
+This must be tested for:
+
+- `pssidm`
+- `lssidm`
+- multi-layer stacks, not just one-layer degenerate cases
+
+Without this, the stack would not be validated as a correct sequence/recurrent dual implementation.
+
+### Inference State Handling
+
+Each block needs its own recurrent cache. So rollout state is no longer one tensor; it is an ordered collection:
+
+`state_t = (x_t^{(1)}, x_t^{(2)}, ..., x_t^{(L)})`
+
+Reset semantics must clear every block state. Step semantics must update every block in order. The rollout adapter must treat the full stack as recurrent even though the training graph is sequence-based.
+
+### Reference-Informed Optimizer Note
+
+Reference SSM implementations often treat sensitive continuous-time parameters specially, especially:
+
+- `A`
+- `B`
+- step-size / `\Delta`-related parameters
+
+The usual pattern is lower learning rate and zero weight decay for these parameters. This is not required for the first stacked implementation, but it should be an explicitly planned optimization refinement if training stability becomes an issue.
+
+### Recommended Updated Build Order
+
+This addendum changes the implementation order after the already-completed scaffold/basic-core work:
+
+1. Refactor the current single-core implementation into a reusable `StructuredSSMBlock`.
+2. Introduce `d_model` and `num_ssm_layers`.
+3. Implement the stacked residual backbone with per-block recurrent caches.
+4. Keep `pssidm` strict:
+   - raw-state semantic inputs
+   - linear timestep-wise lift only
+   - no deep generic front-end encoder
+5. Keep `lssidm` as the same stacked backbone with the shared timestep-wise latent encoder in front.
+6. Add full-stack sequence-vs-recurrent equivalence tests.
+7. Re-run train/load/evaluate smoke tests.
+8. Only after the exact stacked version is correct, consider optional normalization/dropout and optimizer parameter groups.
+
+### Acceptance Criteria Added By This Addendum
+
+In addition to the earlier acceptance criteria, the stacked implementation is not complete until all of the following are true:
+
+1. `pssidm` and `lssidm` expose `d_model` and `num_ssm_layers` as first-class config knobs.
+2. `pssidm` and `lssidm` share the same stacked structured backbone implementation.
+3. The recurrent rollout state is maintained per block and reset correctly.
+4. Full-stack sequence-mode outputs match full-stack recurrent outputs within tolerance.
+5. `pssidm` scaling is achieved primarily through structured block composition rather than through a large generic encoder.
+6. `lssidm` differs from `pssidm` only by the presence of the shared latent encoder ahead of the same structured stack.

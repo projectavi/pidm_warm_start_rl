@@ -2,11 +2,12 @@
 # Licensed under the MIT License.
 
 import math
-from typing import Tuple
+from typing import Any, Tuple
 
 import torch
 from torch import Tensor, nn
 
+from pidm_imitation.agents.models.network_block import NetworkBlock
 from pidm_imitation.utils.valid_controller_actions import ValidControllerActions
 
 
@@ -319,6 +320,7 @@ class SSIDMPolicyNetwork(nn.Module):
         prenorm: bool = False,
         dropout: float = 0.0,
         latent_encoder_dim: int = 128,
+        latent_encoder_network_config: list[dict[str, Any]] | None = None,
         use_latent_encoder: bool = False,
     ):
         super().__init__()
@@ -355,14 +357,29 @@ class SSIDMPolicyNetwork(nn.Module):
         self.dropout = dropout
 
         if self.use_latent_encoder:
-            self.shared_latent_encoder: nn.Module = nn.Sequential(
-                nn.Linear(state_dim, self.d_model),
-                nn.ReLU(),
-            )
+            latent_output_dim: int
+            if latent_encoder_network_config:
+                self.shared_latent_encoder = NetworkBlock(
+                    network_config=latent_encoder_network_config,
+                    input_dim=state_dim,
+                    collapse_sequence=False,
+                )
+                latent_output_dim = self.shared_latent_encoder.out_dim
+            else:
+                self.shared_latent_encoder = nn.Sequential(
+                    nn.Linear(state_dim, latent_encoder_dim),
+                    nn.ReLU(),
+                )
+                latent_output_dim = latent_encoder_dim
+            if latent_output_dim == self.d_model:
+                self.latent_projection: nn.Module = nn.Identity()
+            else:
+                self.latent_projection = nn.Linear(latent_output_dim, self.d_model)
             self.executed_lift = None
             self.reference_lift = None
         else:
             self.shared_latent_encoder = nn.Identity()
+            self.latent_projection = nn.Identity()
             if self.d_model == state_dim:
                 self.executed_lift = nn.Identity()
                 self.reference_lift = nn.Identity()
@@ -395,8 +412,10 @@ class SSIDMPolicyNetwork(nn.Module):
     def _encode_streams(self, inputs: Tensor) -> Tuple[Tensor, Tensor]:
         executed, reference = self._split_streams(inputs)
         if self.use_latent_encoder:
-            return self.shared_latent_encoder(executed), self.shared_latent_encoder(
-                reference
+            return self.latent_projection(
+                self.shared_latent_encoder(executed)
+            ), self.latent_projection(
+                self.shared_latent_encoder(reference)
             )
         assert self.executed_lift is not None and self.reference_lift is not None
         return self.executed_lift(executed), self.reference_lift(reference)

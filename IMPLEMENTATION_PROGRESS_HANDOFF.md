@@ -67,10 +67,20 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - runner-template validation:
     - `python3 -m oss_configs.generate_configs_human --suite oss_configs/experiment_suite.yaml --config_dir toy_configs_suite_stacked_check`
     - generated all 2560 configs successfully after surfacing `d_model` / `num_ssm_layers` in the SSIDM suite templates and removing stale `latent_encoder_hidden_dims`
+  - stacked smoke-train / rollout validation:
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/pssidm_smoke.yaml --new`
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/lssidm_smoke.yaml --new`
+    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/pssidm_smoke.yaml --agent toy_pssidm --checkpoint checkpoints/toy_pssidm_smoke/last.ckpt --episodes 1 --output_dir /tmp/stacked_ssidm_eval_pssidm`
+    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/lssidm_smoke.yaml --agent toy_lssidm --checkpoint checkpoints/toy_lssidm_smoke/last.ckpt --episodes 1 --output_dir /tmp/stacked_ssidm_eval_lssidm`
+    - confirmed:
+      - stacked `pssidm` and `lssidm` both train through the real training entrypoint
+      - both save checkpoints that load through the real evaluation entrypoint
+      - both complete one-episode toy rollouts with the stacked backbone
+      - stacked smoke model summaries show the intended 3-block architecture for both variants
 - Blockers:
   - none
 - Next step:
-  - commit the stacked-config/test/template checkpoint, then run refreshed train/load/eval smokes on the stacked models before moving to comparison-scale experiments
+  - commit the stacked smoke-validation handoff update, then move to comparison-scale experiments and any optimizer/tuning work exposed by those runs
 
 ## Recent Completed Work
 

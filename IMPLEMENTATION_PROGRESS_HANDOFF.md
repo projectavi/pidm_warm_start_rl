@@ -17,42 +17,23 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 
 - Last updated: 2026-04-07
 - Status: in_progress
-- Active request: add configurable nonlinear SSIDM block wrappers, keep commits/docs current, and make the first comparison set (`none`, `silu`, `silu + prenorm`) runnable for both `pssidm` and `lssidm`
-- Current objective: finish the nonlinear block comparison surface, validate sequence/recurrent parity and real train/rollout execution for the first three SSIDM options, and then move to broader comparisons
+- Active request: design a reusable experiment launcher that is easy to specify/extend, and supports parallel runs on a single GPU and across multiple GPUs
+- Current objective: finish and document a plan-file-based GPU-aware experiment orchestrator that supplements `experiments/runner.py`
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
-  - `pidm_imitation/agents/models/ssidm.py`
-  - `configs/supervised_learning/pssidm_example.yaml`
-  - `configs/supervised_learning/lssidm_example.yaml`
-  - `configs/supervised_learning/pssidm_smoke.yaml`
-  - `configs/supervised_learning/lssidm_smoke.yaml`
-  - `configs/supervised_learning/pssidm_silu_smoke.yaml`
-  - `configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml`
-  - `configs/supervised_learning/lssidm_silu_smoke.yaml`
-  - `configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml`
-  - `oss_configs/templates/toy_pssidm_closest_ref.yaml`
-  - `oss_configs/templates/toy_lssidm_closest_ref.yaml`
-  - `oss_configs/templates/toy_pssidm_closest_ref_small.yaml`
-  - `oss_configs/templates/toy_lssidm_closest_ref_small.yaml`
-  - `ssidm_integration_plan.md`
-  - `tests/test_ssidm_core.py`
-  - `tests/test_ssidm_integration.py`
+  - `experiments/orchestrator.py`
+  - `experiments/README.md`
+  - `experiments/plans/ssidm_compare.yaml`
 - Decisions:
-  - `pssidm` and `lssidm` stay as separate registered algorithms but share one underlying SSIDM implementation.
-  - Strict `pssidm` uses fixed next-state lookahead via the repo's existing single-slice lookahead configuration and does not use `lookahead_k_onehot` as a core input.
-  - `lssidm` keeps the same shared SSIDM backbone but activates an internal shared timestep-wise latent encoder so the intended training decomposition is "encode in parallel, then convolve."
-  - Example configs should use nontrivial sequence windows; `history: 7` is now the default in both SSIDM example configs so the sequence model is actually exercised.
-  - Smoke configs stay separate from the example configs to keep fast end-to-end validation isolated from longer benchmark runs.
-  - SSIDM scaling now proceeds through structured composition rather than through a large generic front-end: `d_model` and `num_ssm_layers` are the main new knobs.
-  - The new backbone is a residual stack of structured SSM blocks. Each block preserves the same convolutional training / recurrent inference duality as the original single-block core.
-  - `pssidm` uses only a minimal per-timestep linear lift into `d_model`; `lssidm` uses a shared timestep-wise latent encoder before the same block stack.
-  - The earlier interrupted projection-heavy sizing direction has been removed from tracked code.
-  - Nonlinearity is now introduced only at the block-wrapper level: the internal `StructuredSSMCore` remains linear and exact.
-  - The first comparison set is:
-    - option 1: `block_nonlinearity = none`, `prenorm = false`
-    - option 2: `block_nonlinearity = silu`, `prenorm = false`
-    - option 3: `block_nonlinearity = silu`, `prenorm = true`
-  - `gelu` is supported as a config option, but it is not part of the first comparison matrix.
+  - `experiments/runner.py` remains the suite-first path; the new orchestration surface should supplement it rather than replacing it.
+  - The new script should support two job kinds:
+    - direct `configs` jobs for ad-hoc hand-picked runs
+    - `manifest` jobs for suite-generated experiment subsets
+  - GPU scheduling is modeled as `gpus x slots_per_gpu`, where each active subprocess gets its assigned `CUDA_VISIBLE_DEVICES`.
+  - The orchestrator should write a copied plan and a fully expanded `resolved_runs.json` so a finished run is reproducible.
+  - `--only_job` must prune jobs before expansion so a missing manifest in an unrelated plan section does not block direct-config runs.
+  - Existing checkpoints/results should be reused unless `force_train` / `force_eval` are set.
+  - The repository's `.gitignore` currently ignores the entire `experiments/` directory, so new files there need force-adding during commit unless the ignore policy changes later.
 - Validation:
   - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
   - committed scaffold handoff checkpoint: `754906b` (`Update SSIDM scaffold handoff`)
@@ -113,12 +94,36 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
     - confirmed:
       - nonlinear prenorm variants load from checkpoints
       - nonlinear recurrent rollout completes for both `pssidm` and `lssidm`
+- orchestrator validation:
+  - `python3 -m compileall experiments/orchestrator.py experiments/README.md`
+  - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --only_job nonlinear-smokes --dry_run`
+  - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --only_job four-room-baselines --dry_run`
+  - confirmed:
+    - direct-config jobs expand to the expected six nonlinear SSIDM smoke runs
+    - manifest jobs expand to the expected filtered `bc` / `idm` / `pssidm` / `lssidm` suite subset
+    - `--only_job` now isolates plan sections before expansion
+    - the scheduler surfaces the intended GPU-slot model in dry-run output
 - Blockers:
   - none
 - Next step:
-  - commit the nonlinear comparison configs/docs checkpoint, then run direct option-1/2/3 comparisons and tune optimizer/block settings only if those comparisons expose clear issues
+  - commit the new orchestrator files/docs, then use the plan surface to launch comparison batches
 
 ## Recent Completed Work
+
+### 2026-04-07
+
+- Added a new plan-file-based experiment scheduler in `experiments/orchestrator.py`:
+  - supports direct config-list jobs and manifest-filtered suite jobs
+  - supports train/eval phase chaining with checkpoint/results reuse
+  - supports GPU-aware scheduling with `gpus` and `slots_per_gpu`
+  - writes orchestration artifacts under `outputs/orchestrator/<timestamp>/`
+- Added `experiments/plans/ssidm_compare.yaml` as a concrete example of:
+  - nonlinear SSIDM smoke comparisons from explicit config paths
+  - filtered `bc` / `idm` / `pssidm` / `lssidm` suite runs from `toy_configs/manifest.json`
+- Updated `experiments/README.md` with:
+  - the new orchestrator workflow
+  - the GPU-slot scheduling model
+  - example commands for dry runs, job selection, and match filtering
 
 ### 2026-04-06
 

@@ -1,10 +1,11 @@
 # PIDM Experiment Suite
 
-This directory now provides a manifest-driven workflow for the toy navigation experiments:
+This directory now provides two complementary workflows for the toy navigation experiments:
 
 1. `oss_configs/generate_configs_human.py` generates the exact OSS baseline configs and writes `toy_configs/manifest.json`.
 2. `experiments/runner.py` consumes that manifest to train missing checkpoints, evaluate them, and optionally generate plots.
-3. `experiments/plotter.py` reads the same manifest to aggregate results without guessing metadata from directory names.
+3. `experiments/orchestrator.py` runs an explicit plan file with GPU-aware scheduling for direct config lists or manifest-filtered batches.
+4. `experiments/plotter.py` reads the same manifest to aggregate results without guessing metadata from directory names.
 
 ## Quick Start
 
@@ -77,6 +78,66 @@ Outputs:
 - `outputs/<run_name>/results/<config_stem>/`: stable `results.json`, `results_source.txt`, and `rollout_last_*` artifacts including `rollout_trajectories.jpg`.
 
 Each run gets its own output directory under `outputs/` unless you pass `--output_dir`.
+
+## GPU-Aware Orchestration
+
+Use `experiments/orchestrator.py` when you want a reusable execution plan instead of one-off CLI filters. The orchestrator is designed for:
+
+- explicit hand-picked config lists
+- manifest-driven subsets of the suite
+- multiple concurrent runs on a single GPU
+- concurrent runs spread across multiple GPUs
+
+The scheduler model is:
+
+- `gpus`: which GPU ids are available to the orchestrator
+- `slots_per_gpu`: how many concurrent jobs to allow on each GPU
+
+So `gpus: [0, 1]` and `slots_per_gpu: 2` creates four execution slots:
+
+- `gpu0-slot0`
+- `gpu0-slot1`
+- `gpu1-slot0`
+- `gpu1-slot1`
+
+Each launched subprocess receives the appropriate `CUDA_VISIBLE_DEVICES` value automatically.
+
+Dry-run an example plan:
+
+```bash
+python experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --dry_run
+```
+
+Run only one named job from the plan:
+
+```bash
+python experiments/orchestrator.py \
+  --plan experiments/plans/ssidm_compare.yaml \
+  --only_job nonlinear-smokes
+```
+
+Restrict further to resolved runs whose names contain a substring:
+
+```bash
+python experiments/orchestrator.py \
+  --plan experiments/plans/ssidm_compare.yaml \
+  --only_job nonlinear-smokes \
+  --match prenorm
+```
+
+The example plan shows both supported job types:
+
+- `configs`: explicit config paths with optional per-config `toy_config`, `agent`, `episodes`, `train_args`, `eval_args`, and `env`
+- `manifest`: a generated `manifest.json` plus suite-style filters like `environments`, `methods`, `num_samples`, `seeds`, and `num_seeds`
+
+Outputs for each orchestration run go under `outputs/orchestrator/<timestamp>/` by default:
+
+- `plan.yaml`: the copied execution plan
+- `resolved_runs.json`: the fully expanded run inventory
+- `logs/*.train.log`: per-run training logs
+- `logs/*.eval.log`: per-run evaluation logs
+
+Use the orchestrator when you want to design a batch once and re-run the same plan later without reconstructing CLI filters by hand. Use `runner.py` when you want the existing single-command “generate the suite and run it” path.
 
 ## Adding a New Method
 

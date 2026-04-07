@@ -1,4 +1,4 @@
-experiment_name: toy_pidm_non_smoke
+experiment_name: toy_bc_initial
 
 state:
   type: states
@@ -11,27 +11,19 @@ reference_trajectory:
   inputs: four_room_human_00_inputs.json
 
 agent:
-  type: toy_idm
+  type: toy_bc
   seed: 5678
-  planner_type: closest_reference
-  idm_planner:
-    eval_lookahead_type: fixed
-    eval_lookahead: 0
-    planner_kwargs:
-      distance_measure: l2
-      masking_conditions:
-        - ["toy_same_goal", {}]
 
 wandb:
-  username: t-luschaefer
-  project: Lukas_Sandbox
-  eval_group: TestRuns
+  username: projectavi
+  project: ssidm
+  eval_group: InitalComps
   save_dir: ./logs
   log_model: false
   offline: true
-  train_name: toy_pidm_non_smoke
-  eval_name: toy_pidm_non_smoke/eval
-  train_group: TestRuns
+  train_name: toy_bc_initial
+  eval_name: toy_bc_initial/eval
+  train_group: InitalComps
 
 pytorch_lightning:
   seed_everything: 5678
@@ -44,7 +36,12 @@ pytorch_lightning:
     max_steps: 10000
   optimizer: adam
   optimizer_kwargs:
-    lr: 0.00001
+    lr: 0.001
+  scheduler: torch.optim.lr_scheduler.LinearLR
+  scheduler_kwargs:
+    start_factor: 1.0
+    end_factor: 0.001
+    total_iters: 50000
 
 callbacks:
   checkpoint_callback: true
@@ -56,7 +53,7 @@ callbacks:
     verbose: false
     save_last: true
     save_on_train_epoch_end: true
-    dirpath: checkpoints/toy_pidm_non_smoke
+    dirpath: checkpoints/toy_bc_initial
 
 data:
   train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/
@@ -69,16 +66,11 @@ data:
   history_slice_specs:
     class_name: LinearSlicer
     num_samples: 0
-  lookahead: 1
-  lookahead_slice_specs:
-    class_name: LinearSlicer
-    num_samples: 1
-  include_k: true
   padding_strategy: zero
   alignment_strategy: causal_action_frame_alignment
 
 model:
-  algorithm: idm
+  algorithm: bc
   input_format: state_only
   submodels:
     state_encoder:

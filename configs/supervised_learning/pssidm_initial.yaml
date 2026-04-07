@@ -1,4 +1,4 @@
-experiment_name: toy_lssidm_silu_prenorm_non_smoke
+experiment_name: toy_pssidm_initial
 
 state:
   type: states
@@ -11,7 +11,7 @@ reference_trajectory:
   inputs: four_room_human_00_inputs.json
 
 agent:
-  type: toy_lssidm
+  type: toy_pssidm
   seed: 5678
   planner_type: closest_reference
   idm_planner:
@@ -23,15 +23,15 @@ agent:
         - ["toy_same_goal", {}]
 
 wandb:
-  username: t-luschaefer
-  project: Lukas_Sandbox
-  eval_group: TestRuns
+  username: projectavi
+  project: ssidm
+  eval_group: InitalComps
   save_dir: ./logs
   log_model: false
   offline: true
-  train_name: toy_lssidm_silu_prenorm_non_smoke
-  eval_name: toy_lssidm_silu_prenorm_non_smoke/eval
-  train_group: TestRuns
+  train_name: toy_pssidm_initial
+  eval_name: toy_pssidm_initial/eval
+  train_group: InitalComps
 
 pytorch_lightning:
   seed_everything: 5678
@@ -56,7 +56,7 @@ callbacks:
     verbose: false
     save_last: true
     save_on_train_epoch_end: true
-    dirpath: checkpoints/toy_lssidm_silu_prenorm_non_smoke
+    dirpath: checkpoints/toy_pssidm_initial
 
 data:
   train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/
@@ -78,7 +78,7 @@ data:
   alignment_strategy: causal_action_frame_alignment
 
 model:
-  algorithm: lssidm
+  algorithm: pssidm
   input_format: state_only
   submodels:
     policy_head:
@@ -93,9 +93,8 @@ model:
             delta_init: 1.0
             hippo_init: true
             diagonal_A: true
-            block_nonlinearity: silu
-            prenorm: true
+            block_nonlinearity: none
+            prenorm: false
             dropout: 0.0
-            latent_encoder_dim: 64
         action_loss:
           continuous_loss: l1

@@ -131,6 +131,12 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - the GPU-slot scheduling model
   - example commands for dry runs, job selection, and match filtering
 - Added `configs/supervised_learning/bc_smoke.yaml` and `configs/supervised_learning/pidm_smoke.yaml` so the direct-config comparison plan can include baseline `bc` and `pidm` runs without sharing a generic checkpoint directory.
+- Renamed the 10k-step long-run comparison configs from `*_non_smoke.yaml` to `*_initial.yaml` and updated their WandB metadata:
+  - `username: projectavi`
+  - `project: ssidm`
+  - `eval_group: InitalComps`
+  - `train_group: InitalComps`
+  - matching `train_name`, `eval_name`, `experiment_name`, and checkpoint directory names
 
 ### 2026-04-06
 

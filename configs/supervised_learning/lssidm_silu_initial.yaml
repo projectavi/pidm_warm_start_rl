@@ -1,4 +1,4 @@
-experiment_name: toy_lssidm_silu_non_smoke
+experiment_name: toy_lssidm_silu_initial
 
 state:
   type: states
@@ -23,15 +23,15 @@ agent:
         - ["toy_same_goal", {}]
 
 wandb:
-  username: t-luschaefer
-  project: Lukas_Sandbox
-  eval_group: TestRuns
+  username: projectavi
+  project: ssidm
+  eval_group: InitalComps
   save_dir: ./logs
   log_model: false
   offline: true
-  train_name: toy_lssidm_silu_non_smoke
-  eval_name: toy_lssidm_silu_non_smoke/eval
-  train_group: TestRuns
+  train_name: toy_lssidm_silu_initial
+  eval_name: toy_lssidm_silu_initial/eval
+  train_group: InitalComps
 
 pytorch_lightning:
   seed_everything: 5678
@@ -56,7 +56,7 @@ callbacks:
     verbose: false
     save_last: true
     save_on_train_epoch_end: true
-    dirpath: checkpoints/toy_lssidm_silu_non_smoke
+    dirpath: checkpoints/toy_lssidm_silu_initial
 
 data:
   train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/

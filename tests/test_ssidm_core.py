@@ -82,6 +82,8 @@ class SSIDMPolicyNetworkTests(unittest.TestCase):
                 input_dim=8,
                 state_dim=4,
                 action_type="left_stick",
+                d_model=6,
+                num_ssm_layers=3,
                 ssm_state_dim=6,
                 delta_init=0.5,
                 hippo_init=True,
@@ -108,6 +110,60 @@ class SSIDMPolicyNetworkTests(unittest.TestCase):
                     rtol=1e-5,
                 )
             )
+
+    def test_training_convolution_matches_recurrent_sequence_for_stacked_pssidm(self):
+        torch.manual_seed(0)
+        model = SSIDMPolicyNetwork(
+            input_dim=8,
+            state_dim=4,
+            action_type="left_stick",
+            d_model=7,
+            num_ssm_layers=4,
+            ssm_state_dim=5,
+            delta_init=0.5,
+            hippo_init=True,
+            diagonal_A=True,
+            use_latent_encoder=False,
+        )
+        inputs = torch.randn(2, 9, 8)
+
+        convolution = model.forward_convolution(inputs)
+        recurrent = model.forward_recurrent(inputs)
+
+        self.assertTrue(
+            torch.allclose(
+                convolution,
+                recurrent,
+                atol=1e-5,
+                rtol=1e-5,
+            )
+        )
+
+    def test_reset_clears_all_block_caches(self):
+        torch.manual_seed(0)
+        model = SSIDMPolicyNetwork(
+            input_dim=8,
+            state_dim=4,
+            action_type="left_stick",
+            d_model=6,
+            num_ssm_layers=3,
+            ssm_state_dim=4,
+            delta_init=0.5,
+            hippo_init=True,
+            diagonal_A=True,
+            use_latent_encoder=False,
+        )
+        model.eval()
+        inputs = torch.randn(1, 3, 8)
+
+        for k in range(inputs.shape[1]):
+            model(inputs[:, k : k + 1, :])
+
+        self.assertTrue(all(block._cached_state is not None for block in model.blocks))
+
+        model.reset()
+
+        self.assertTrue(all(block._cached_state is None for block in model.blocks))
 
 
 if __name__ == "__main__":

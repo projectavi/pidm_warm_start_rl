@@ -212,10 +212,11 @@ class SSIDMPolicyNetwork(nn.Module):
     """
     Shared SSIDM implementation for both PSSIDM and LSSIDM.
 
-    PSSIDM uses raw executed/reference state streams directly.
-    LSSIDM applies one shared pointwise latent encoder to both streams before the same
-    structured SSM core. Training uses the convolutional forward path; inference uses
-    the recurrent path with persistent internal state.
+    The backbone is a residual stack of structured SSM blocks. PSSIDM uses only a
+    minimal per-timestep linear lift from raw executed/reference state streams into
+    a common hidden width d_model. LSSIDM uses a shared timestep-wise latent encoder
+    instead. Training uses the convolutional sequence path through every block;
+    inference uses recurrent stepping with one cached state per block.
     """
 
     def __init__(
@@ -223,6 +224,8 @@ class SSIDMPolicyNetwork(nn.Module):
         input_dim: int,
         state_dim: int,
         action_type: str,
+        d_model: int | None = None,
+        num_ssm_layers: int = 1,
         ssm_state_dim: int = 64,
         delta_init: float = 1.0,
         hippo_init: bool = True,
@@ -246,25 +249,48 @@ class SSIDMPolicyNetwork(nn.Module):
         self.state_dim = state_dim
         self.action_type = action_type
         self.use_latent_encoder = use_latent_encoder
-        self.stream_dim = latent_encoder_dim if use_latent_encoder else state_dim
         self.action_dim = ValidControllerActions.get_actions_dim(action_type)
+        self.d_model = d_model if d_model is not None else (
+            latent_encoder_dim if use_latent_encoder else state_dim
+        )
+        if self.d_model <= 0:
+            raise ValueError(f"d_model must be positive, got {self.d_model}.")
+        if num_ssm_layers <= 0:
+            raise ValueError(
+                f"num_ssm_layers must be positive, got {num_ssm_layers}."
+            )
+        self.num_ssm_layers = num_ssm_layers
 
         if self.use_latent_encoder:
             self.shared_latent_encoder: nn.Module = nn.Sequential(
-                nn.Linear(state_dim, latent_encoder_dim),
+                nn.Linear(state_dim, self.d_model),
                 nn.ReLU(),
             )
+            self.executed_lift = None
+            self.reference_lift = None
         else:
             self.shared_latent_encoder = nn.Identity()
+            if self.d_model == state_dim:
+                self.executed_lift = nn.Identity()
+                self.reference_lift = nn.Identity()
+            else:
+                self.executed_lift = nn.Linear(state_dim, self.d_model)
+                self.reference_lift = nn.Linear(state_dim, self.d_model)
 
-        self.core = StructuredSSMCore(
-            stream_dim=self.stream_dim,
-            action_dim=self.action_dim,
-            ssm_state_dim=ssm_state_dim,
-            delta_init=delta_init,
-            hippo_init=hippo_init,
-            diagonal_A=diagonal_A,
+        self.blocks = nn.ModuleList(
+            [
+                StructuredSSMCore(
+                    stream_dim=self.d_model,
+                    action_dim=self.d_model,
+                    ssm_state_dim=ssm_state_dim,
+                    delta_init=delta_init,
+                    hippo_init=hippo_init,
+                    diagonal_A=diagonal_A,
+                )
+                for _ in range(self.num_ssm_layers)
+            ]
         )
+        self.output_head = nn.Linear(self.d_model, self.action_dim)
 
     def _split_streams(self, inputs: Tensor) -> Tuple[Tensor, Tensor]:
         executed = inputs[..., : self.state_dim]
@@ -273,26 +299,35 @@ class SSIDMPolicyNetwork(nn.Module):
 
     def _encode_streams(self, inputs: Tensor) -> Tuple[Tensor, Tensor]:
         executed, reference = self._split_streams(inputs)
-        return self.shared_latent_encoder(executed), self.shared_latent_encoder(
-            reference
-        )
+        if self.use_latent_encoder:
+            return self.shared_latent_encoder(executed), self.shared_latent_encoder(
+                reference
+            )
+        assert self.executed_lift is not None and self.reference_lift is not None
+        return self.executed_lift(executed), self.reference_lift(reference)
 
     def forward_convolution(self, inputs: Tensor) -> Tensor:
-        executed, reference = self._encode_streams(inputs)
-        return self.core.forward_convolve(executed, reference)
+        hidden, reference = self._encode_streams(inputs)
+        for block in self.blocks:
+            hidden = hidden + block.forward_convolve(hidden, reference)
+        return self.output_head(hidden)
 
     def forward_recurrent(self, inputs: Tensor) -> Tensor:
-        executed, reference = self._encode_streams(inputs)
-        return self.core.forward_recurrent(
-            executed,
-            reference,
-            use_cached_state=False,
-            update_cache=False,
-        )
+        hidden, reference = self._encode_streams(inputs)
+        for block in self.blocks:
+            hidden = hidden + block.forward_recurrent(
+                hidden,
+                reference,
+                use_cached_state=False,
+                update_cache=False,
+            )
+        return self.output_head(hidden)
 
     def forward_step(self, inputs: Tensor) -> Tensor:
-        executed, reference = self._encode_streams(inputs)
-        return self.core.step(executed, reference)
+        hidden, reference = self._encode_streams(inputs)
+        for block in self.blocks:
+            hidden = hidden + block.step(hidden, reference)
+        return self.output_head(hidden)
 
     def forward(self, inputs: Tensor) -> Tensor:
         if self.training:
@@ -302,7 +337,8 @@ class SSIDMPolicyNetwork(nn.Module):
         return self.forward_recurrent(inputs)
 
     def reset(self) -> None:
-        self.core.reset()
+        for block in self.blocks:
+            block.reset()
 
     @property
     def collapse_sequence(self) -> bool:
@@ -315,3 +351,6 @@ class SSIDMPolicyNetwork(nn.Module):
     @property
     def out_dim(self) -> int:
         return self.action_dim
+
+
+StructuredSSMBlock = StructuredSSMCore

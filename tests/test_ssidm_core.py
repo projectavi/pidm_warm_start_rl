@@ -139,6 +139,96 @@ class SSIDMPolicyNetworkTests(unittest.TestCase):
             )
         )
 
+    def test_training_convolution_matches_recurrent_sequence_for_nonlinear_variants(self):
+        torch.manual_seed(0)
+        inputs = torch.randn(2, 9, 8)
+
+        for block_nonlinearity, prenorm in [
+            ("none", False),
+            ("silu", False),
+            ("silu", True),
+            ("gelu", False),
+        ]:
+            model = SSIDMPolicyNetwork(
+                input_dim=8,
+                state_dim=4,
+                action_type="left_stick",
+                d_model=7,
+                num_ssm_layers=3,
+                ssm_state_dim=5,
+                delta_init=0.5,
+                hippo_init=True,
+                diagonal_A=True,
+                block_nonlinearity=block_nonlinearity,
+                prenorm=prenorm,
+                dropout=0.0,
+                use_latent_encoder=False,
+            )
+
+            convolution = model.forward_convolution(inputs)
+            recurrent = model.forward_recurrent(inputs)
+
+            self.assertTrue(
+                torch.allclose(
+                    convolution,
+                    recurrent,
+                    atol=1e-5,
+                    rtol=1e-5,
+                ),
+                msg=f"Mismatch for block_nonlinearity={block_nonlinearity}, prenorm={prenorm}",
+            )
+
+    def test_eval_step_matches_recurrent_sequence_for_nonlinear_lssidm(self):
+        torch.manual_seed(0)
+        inputs = torch.randn(1, 6, 8)
+        model = SSIDMPolicyNetwork(
+            input_dim=8,
+            state_dim=4,
+            action_type="left_stick",
+            d_model=6,
+            num_ssm_layers=3,
+            ssm_state_dim=6,
+            delta_init=0.5,
+            hippo_init=True,
+            diagonal_A=True,
+            block_nonlinearity="silu",
+            prenorm=True,
+            latent_encoder_dim=6,
+            use_latent_encoder=True,
+        )
+        model.eval()
+
+        model.reset()
+        rollout_outputs = []
+        for k in range(inputs.shape[1]):
+            rollout_outputs.append(model(inputs[:, k : k + 1, :]))
+        rollout_outputs = torch.cat(rollout_outputs, dim=1)
+
+        model.reset()
+        recurrent_outputs = model.forward_recurrent(inputs)
+
+        self.assertTrue(
+            torch.allclose(
+                rollout_outputs,
+                recurrent_outputs,
+                atol=1e-5,
+                rtol=1e-5,
+            )
+        )
+
+    def test_invalid_block_nonlinearity_raises(self):
+        with self.assertRaises(ValueError):
+            SSIDMPolicyNetwork(
+                input_dim=8,
+                state_dim=4,
+                action_type="left_stick",
+                d_model=6,
+                num_ssm_layers=2,
+                ssm_state_dim=4,
+                block_nonlinearity="relu",
+                use_latent_encoder=False,
+            )
+
     def test_reset_clears_all_block_caches(self):
         torch.manual_seed(0)
         model = SSIDMPolicyNetwork(

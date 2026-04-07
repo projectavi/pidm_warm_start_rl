@@ -52,6 +52,19 @@ def causal_conv_fft(u_tilde: Tensor, K: Tensor) -> Tensor:
     return y.transpose(1, 2)
 
 
+def get_block_nonlinearity(name: str) -> nn.Module:
+    name = name.lower()
+    if name == "none":
+        return nn.Identity()
+    if name == "silu":
+        return nn.SiLU()
+    if name == "gelu":
+        return nn.GELU()
+    raise ValueError(
+        f"Unsupported SSIDM block nonlinearity '{name}'. Expected one of: none, silu, gelu."
+    )
+
+
 class StructuredSSMCore(nn.Module):
     """
     Continuous-time linear state space model with ZOH discretisation.
@@ -208,6 +221,78 @@ class StructuredSSMCore(nn.Module):
         self._cached_state = None
 
 
+class StructuredSSMBlock(nn.Module):
+    """
+    Residual SSIDM block that wraps the exact linear SSM core with optional
+    prenorm, pointwise nonlinearity, and dropout.
+
+    The core remains unchanged and linear. Any nonlinearity is applied pointwise
+    to the block output so the sequence/recurrent dual execution paths remain
+    consistent while adding network-level expressiveness.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        ssm_state_dim: int = 64,
+        delta_init: float = 1.0,
+        hippo_init: bool = True,
+        diagonal_A: bool = True,
+        block_nonlinearity: str = "none",
+        prenorm: bool = False,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError(f"d_model must be positive, got {d_model}.")
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError(f"dropout must be in [0, 1), got {dropout}.")
+
+        self.norm: nn.Module = nn.LayerNorm(d_model) if prenorm else nn.Identity()
+        self.core = StructuredSSMCore(
+            stream_dim=d_model,
+            action_dim=d_model,
+            ssm_state_dim=ssm_state_dim,
+            delta_init=delta_init,
+            hippo_init=hippo_init,
+            diagonal_A=diagonal_A,
+        )
+        self.activation = get_block_nonlinearity(block_nonlinearity)
+        self.dropout: nn.Module = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+        self.block_nonlinearity = block_nonlinearity
+        self.prenorm = prenorm
+
+    def _postprocess(self, delta: Tensor) -> Tensor:
+        return self.dropout(self.activation(delta))
+
+    def forward_convolution(self, hidden: Tensor, reference: Tensor) -> Tensor:
+        normalized_hidden = self.norm(hidden)
+        delta = self.core.forward_convolve(normalized_hidden, reference)
+        return hidden + self._postprocess(delta)
+
+    def forward_recurrent(self, hidden: Tensor, reference: Tensor) -> Tensor:
+        normalized_hidden = self.norm(hidden)
+        delta = self.core.forward_recurrent(
+            normalized_hidden,
+            reference,
+            use_cached_state=False,
+            update_cache=False,
+        )
+        return hidden + self._postprocess(delta)
+
+    def forward_step(self, hidden: Tensor, reference: Tensor) -> Tensor:
+        normalized_hidden = self.norm(hidden)
+        delta = self.core.step(normalized_hidden, reference)
+        return hidden + self._postprocess(delta)
+
+    def reset(self) -> None:
+        self.core.reset()
+
+    @property
+    def _cached_state(self) -> Tensor | None:
+        return self.core._cached_state
+
+
 class SSIDMPolicyNetwork(nn.Module):
     """
     Shared SSIDM implementation for both PSSIDM and LSSIDM.
@@ -230,6 +315,9 @@ class SSIDMPolicyNetwork(nn.Module):
         delta_init: float = 1.0,
         hippo_init: bool = True,
         diagonal_A: bool = True,
+        block_nonlinearity: str = "none",
+        prenorm: bool = False,
+        dropout: float = 0.0,
         latent_encoder_dim: int = 128,
         use_latent_encoder: bool = False,
     ):
@@ -259,7 +347,12 @@ class SSIDMPolicyNetwork(nn.Module):
             raise ValueError(
                 f"num_ssm_layers must be positive, got {num_ssm_layers}."
             )
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError(f"dropout must be in [0, 1), got {dropout}.")
         self.num_ssm_layers = num_ssm_layers
+        self.block_nonlinearity = block_nonlinearity
+        self.prenorm = prenorm
+        self.dropout = dropout
 
         if self.use_latent_encoder:
             self.shared_latent_encoder: nn.Module = nn.Sequential(
@@ -279,13 +372,15 @@ class SSIDMPolicyNetwork(nn.Module):
 
         self.blocks = nn.ModuleList(
             [
-                StructuredSSMCore(
-                    stream_dim=self.d_model,
-                    action_dim=self.d_model,
+                StructuredSSMBlock(
+                    d_model=self.d_model,
                     ssm_state_dim=ssm_state_dim,
                     delta_init=delta_init,
                     hippo_init=hippo_init,
                     diagonal_A=diagonal_A,
+                    block_nonlinearity=block_nonlinearity,
+                    prenorm=prenorm,
+                    dropout=dropout,
                 )
                 for _ in range(self.num_ssm_layers)
             ]
@@ -309,24 +404,19 @@ class SSIDMPolicyNetwork(nn.Module):
     def forward_convolution(self, inputs: Tensor) -> Tensor:
         hidden, reference = self._encode_streams(inputs)
         for block in self.blocks:
-            hidden = hidden + block.forward_convolve(hidden, reference)
+            hidden = block.forward_convolution(hidden, reference)
         return self.output_head(hidden)
 
     def forward_recurrent(self, inputs: Tensor) -> Tensor:
         hidden, reference = self._encode_streams(inputs)
         for block in self.blocks:
-            hidden = hidden + block.forward_recurrent(
-                hidden,
-                reference,
-                use_cached_state=False,
-                update_cache=False,
-            )
+            hidden = block.forward_recurrent(hidden, reference)
         return self.output_head(hidden)
 
     def forward_step(self, inputs: Tensor) -> Tensor:
         hidden, reference = self._encode_streams(inputs)
         for block in self.blocks:
-            hidden = hidden + block.step(hidden, reference)
+            hidden = block.forward_step(hidden, reference)
         return self.output_head(hidden)
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -351,6 +441,3 @@ class SSIDMPolicyNetwork(nn.Module):
     @property
     def out_dim(self) -> int:
         return self.action_dim
-
-
-StructuredSSMBlock = StructuredSSMCore

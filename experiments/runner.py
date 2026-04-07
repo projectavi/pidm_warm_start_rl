@@ -3,10 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
-from datetime import datetime, timezone
 import shutil
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, TextIO
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -20,6 +24,7 @@ from experiments.common import (
     filter_experiments,
     find_checkpoint,
     get_results_file,
+    launch_command,
     load_manifest,
     promote_latest_results,
     resolve_manifest_path,
@@ -37,6 +42,23 @@ SMOKE_TEST_NUM_SAMPLES = 50
 SMOKE_TEST_NUM_SEEDS = 1
 SMOKE_TEST_EPISODES = 3
 SMOKE_TEST_MAX_STEPS = 100
+
+
+@dataclass
+class ExperimentRunState:
+    index: int
+    experiment: dict[str, Any]
+    checkpoint_path: Path | None = None
+    training_required: bool = False
+    training_failed: bool = False
+
+
+@dataclass
+class ActiveTrainingJob:
+    state: ExperimentRunState
+    process: subprocess.Popen[Any]
+    log_handle: TextIO
+    log_path: Path
 
 
 def log_progress(message: str) -> None:
@@ -83,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Override the generated dataloader worker count.",
+    )
+    parser.add_argument(
+        "--parallel_jobs",
+        type=int,
+        default=1,
+        help="Number of training jobs to run side by side. Evaluation stays serial.",
     )
     parser.add_argument(
         "--smoke_test",
@@ -257,6 +285,7 @@ def build_run_output_dir(args: argparse.Namespace, experiments: list[dict]) -> P
     worker_part = (
         f"workers-{args.num_workers}" if args.num_workers is not None else "paper-workers"
     )
+    parallel_part = f"parallel-{args.parallel_jobs}"
     experiment_count = f"{len(experiments)}runs"
 
     run_name = "__".join(
@@ -270,6 +299,7 @@ def build_run_output_dir(args: argparse.Namespace, experiments: list[dict]) -> P
             step_part,
             batch_part,
             worker_part,
+            parallel_part,
             experiment_count,
         ]
     )
@@ -309,9 +339,9 @@ def copy_experiment_results(
     log_progress(f"Copied {experiment['config_stem']} results into {dest}.")
 
 
-def train_experiment(manifest: dict, experiment: dict, enable_wandb: bool) -> bool:
+def build_training_command(manifest: dict, experiment: dict) -> list[str]:
     config_path = resolve_manifest_path(manifest, experiment["config_path"])
-    command = [
+    return [
         sys.executable,
         "-u",
         "-m",
@@ -320,7 +350,170 @@ def train_experiment(manifest: dict, experiment: dict, enable_wandb: bool) -> bo
         str(config_path),
         "--new",
     ]
-    return run_command(command, env_overrides=build_wandb_env(enable_wandb)) == 0
+
+
+def train_experiment(manifest: dict, experiment: dict, enable_wandb: bool) -> bool:
+    return (
+        run_command(
+            build_training_command(manifest, experiment),
+            env_overrides=build_wandb_env(enable_wandb),
+        )
+        == 0
+    )
+
+
+def resolve_experiment_states(
+    manifest: dict,
+    experiments: list[dict[str, Any]],
+    force_train: bool,
+    skip_train: bool,
+    failed_training: list[str],
+) -> list[ExperimentRunState]:
+    states: list[ExperimentRunState] = []
+    total = len(experiments)
+    for index, experiment in enumerate(experiments, start=1):
+        checkpoint_path = None if force_train else find_checkpoint(manifest, experiment)
+        state = ExperimentRunState(
+            index=index,
+            experiment=experiment,
+            checkpoint_path=checkpoint_path,
+            training_required=checkpoint_path is None,
+            training_failed=False,
+        )
+        if checkpoint_path is None and skip_train:
+            print("Checkpoint missing and training is disabled, skipping.", flush=True)
+            failed_training.append(experiment["config_stem"])
+            state.training_failed = True
+        elif checkpoint_path is None:
+            if force_train:
+                log_progress(
+                    f"Experiment {index}/{total} will retrain from scratch: {experiment['config_stem']}."
+                )
+            else:
+                log_progress(
+                    f"Experiment {index}/{total} is missing a checkpoint and will be trained: {experiment['config_stem']}."
+                )
+        else:
+            log_progress(
+                f"Found checkpoint for {experiment['config_stem']} at {checkpoint_path}."
+            )
+        states.append(state)
+    return states
+
+
+def launch_training_job(
+    manifest: dict,
+    state: ExperimentRunState,
+    enable_wandb: bool,
+    logs_dir: Path,
+) -> ActiveTrainingJob:
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / f"{state.experiment['config_stem']}.train.log"
+    log_handle = log_path.open("w", encoding="utf-8")
+    try:
+        process = launch_command(
+            build_training_command(manifest, state.experiment),
+            env_overrides=build_wandb_env(enable_wandb),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+    except Exception:
+        log_handle.close()
+        raise
+    return ActiveTrainingJob(
+        state=state,
+        process=process,
+        log_handle=log_handle,
+        log_path=log_path,
+    )
+
+
+def run_training_jobs(
+    manifest: dict,
+    states: list[ExperimentRunState],
+    enable_wandb: bool,
+    parallel_jobs: int,
+    logs_dir: Path,
+    failed_training: list[str],
+) -> None:
+    pending_states = [
+        state
+        for state in states
+        if state.training_required and not state.training_failed
+    ]
+    if not pending_states:
+        return
+
+    total = len(pending_states)
+    active_jobs: list[ActiveTrainingJob] = []
+    started = 0
+    finished = 0
+    log_progress(
+        f"Launching {total} training jobs with parallel_jobs={parallel_jobs}. Training logs will be written to {logs_dir}."
+    )
+
+    while pending_states or active_jobs:
+        while pending_states and len(active_jobs) < parallel_jobs:
+            state = pending_states.pop(0)
+            started += 1
+            try:
+                job = launch_training_job(
+                    manifest=manifest,
+                    state=state,
+                    enable_wandb=enable_wandb,
+                    logs_dir=logs_dir,
+                )
+            except OSError as exc:
+                state.training_failed = True
+                failed_training.append(state.experiment["config_stem"])
+                log_progress(
+                    f"Failed to launch training for {state.experiment['config_stem']}: {exc}."
+                )
+                continue
+            active_jobs.append(job)
+            log_progress(
+                f"Started training {started}/{total}: {state.experiment['config_stem']} -> {job.log_path}"
+            )
+
+        if not active_jobs:
+            continue
+
+        finished_any = False
+        for job in list(active_jobs):
+            returncode = job.process.poll()
+            if returncode is None:
+                continue
+            finished_any = True
+            active_jobs.remove(job)
+            job.log_handle.close()
+            finished += 1
+
+            state = job.state
+            config_stem = state.experiment["config_stem"]
+            if returncode != 0:
+                state.training_failed = True
+                failed_training.append(config_stem)
+                log_progress(
+                    f"Training failed for {config_stem} with return code {returncode}. See {job.log_path}."
+                )
+                continue
+
+            checkpoint_path = find_checkpoint(manifest, state.experiment)
+            if checkpoint_path is None:
+                state.training_failed = True
+                failed_training.append(config_stem)
+                log_progress(
+                    f"Training for {config_stem} completed without a checkpoint. See {job.log_path}."
+                )
+                continue
+
+            state.checkpoint_path = checkpoint_path
+            log_progress(
+                f"Completed training {finished}/{total}: {config_stem} -> {checkpoint_path}"
+            )
+
+        if active_jobs and not finished_any:
+            time.sleep(1)
 
 
 def resolve_reference_recording(
@@ -422,6 +615,8 @@ def main() -> int:
     args = apply_smoke_test_defaults(args)
     if args.force_train and args.skip_train:
         raise ValueError("--force_train cannot be combined with --skip_train.")
+    if args.parallel_jobs <= 0:
+        raise ValueError("--parallel_jobs must be a positive integer.")
     manifest = ensure_manifest(args)
     log_progress(
         f"Loaded suite with {len(manifest.get('experiments', []))} generated experiment configs."
@@ -451,33 +646,34 @@ def main() -> int:
     failed_training: list[str] = []
     failed_evaluation: list[str] = []
     completed = 0
+    training_logs_dir = run_output_dir / "logs"
 
-    for index, experiment in enumerate(experiments, start=1):
+    states = resolve_experiment_states(
+        manifest=manifest,
+        experiments=experiments,
+        force_train=args.force_train,
+        skip_train=args.skip_train,
+        failed_training=failed_training,
+    )
+    run_training_jobs(
+        manifest=manifest,
+        states=states,
+        enable_wandb=args.enable_wandb,
+        parallel_jobs=args.parallel_jobs,
+        logs_dir=training_logs_dir,
+        failed_training=failed_training,
+    )
+
+    for state in states:
+        index = state.index
+        experiment = state.experiment
         log_progress(
             f"Starting experiment {index}/{len(experiments)}: {experiment['config_stem']}"
         )
         print(f"\n>>> {experiment['config_stem']} <<<", flush=True)
-        checkpoint_path = None if args.force_train else find_checkpoint(manifest, experiment)
-        if checkpoint_path is None and args.skip_train:
-            print("Checkpoint missing and training is disabled, skipping.", flush=True)
-            failed_training.append(experiment["config_stem"])
+        if state.training_failed:
             continue
-
-        if checkpoint_path is None:
-            if args.force_train:
-                log_progress("Force-train enabled. Launching fresh training and replacing any existing checkpoint.")
-            else:
-                log_progress("Checkpoint missing. Launching training.")
-            if not train_experiment(
-                manifest=manifest,
-                experiment=experiment,
-                enable_wandb=args.enable_wandb,
-            ):
-                failed_training.append(experiment["config_stem"])
-                continue
-            checkpoint_path = find_checkpoint(manifest, experiment)
-        else:
-            log_progress(f"Found checkpoint at {checkpoint_path}.")
+        checkpoint_path = state.checkpoint_path
 
         if checkpoint_path is None:
             print(

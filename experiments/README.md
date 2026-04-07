@@ -26,6 +26,14 @@ To regenerate the suite with more dataloader workers as well:
 python experiments/runner.py --batch_size 8192 --num_workers 8
 ```
 
+To keep small-model trainings busier by running multiple jobs side by side:
+
+```bash
+python experiments/runner.py --batch_size 8192 --num_workers 8 --parallel_jobs 2
+```
+
+Parallel training writes one log file per experiment under `outputs/<run_name>/logs/`.
+
 For a quick proof-of-life run that is intended to finish in a few minutes instead of launching the full paper-scale setup:
 
 ```bash

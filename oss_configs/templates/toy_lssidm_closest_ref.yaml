@@ -88,6 +88,9 @@ model:
             ssm_state_dim: 128
             hippo_init: true
             diagonal_A: true
+            block_nonlinearity: none
+            prenorm: false
+            dropout: 0.0
             latent_encoder_dim: 128
         action_loss:
           continuous_loss: l1

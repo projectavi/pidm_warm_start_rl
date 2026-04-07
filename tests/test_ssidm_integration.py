@@ -75,6 +75,52 @@ class SSIDMIntegrationTests(unittest.TestCase):
         self.assertEqual(lssidm_model.policy_head.policy_model.d_model, 64)
         self.assertEqual(len(pssidm_model.policy_head.policy_model.blocks), 3)
         self.assertEqual(len(lssidm_model.policy_head.policy_model.blocks), 3)
+        self.assertEqual(
+            pssidm_model.policy_head.policy_model.block_nonlinearity, "none"
+        )
+        self.assertEqual(
+            lssidm_model.policy_head.policy_model.block_nonlinearity, "none"
+        )
+        self.assertFalse(pssidm_model.policy_head.policy_model.prenorm)
+        self.assertFalse(lssidm_model.policy_head.policy_model.prenorm)
+
+    def test_nonlinear_smoke_configs_instantiate(self):
+        for config_path, agent_name, expected_nonlinearity, expected_prenorm, expected_latent in [
+            (
+                "configs/supervised_learning/pssidm_silu_smoke.yaml",
+                "toy_pssidm",
+                "silu",
+                False,
+                False,
+            ),
+            (
+                "configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml",
+                "toy_pssidm",
+                "silu",
+                True,
+                False,
+            ),
+            (
+                "configs/supervised_learning/lssidm_silu_smoke.yaml",
+                "toy_lssidm",
+                "silu",
+                False,
+                True,
+            ),
+            (
+                "configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml",
+                "toy_lssidm",
+                "silu",
+                True,
+                True,
+            ),
+        ]:
+            _, model = self._get_config_and_model(config_path, agent_name)
+            policy_model = model.policy_head.policy_model
+            self.assertIsInstance(policy_model, SSIDMPolicyNetwork)
+            self.assertEqual(policy_model.block_nonlinearity, expected_nonlinearity)
+            self.assertEqual(policy_model.prenorm, expected_prenorm)
+            self.assertEqual(policy_model.use_latent_encoder, expected_latent)
 
     def test_rollout_action_selection_uses_last_sequence_step(self):
         predicted = torch.tensor([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]])

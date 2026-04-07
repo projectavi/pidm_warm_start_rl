@@ -823,3 +823,88 @@ In addition to the earlier acceptance criteria, the stacked implementation is no
 4. Full-stack sequence-mode outputs match full-stack recurrent outputs within tolerance.
 5. `pssidm` scaling is achieved primarily through structured block composition rather than through a large generic encoder.
 6. `lssidm` differs from `pssidm` only by the presence of the shared latent encoder ahead of the same structured stack.
+
+## Nonlinear Block Addendum
+
+The next expressiveness step is to keep the internal `StructuredSSMCore` fixed and linear, but make the stacked backbone configurable with pointwise nonlinear wrappers around each structured block. This preserves the main per-block sequence-parallel benefit while allowing the overall stacked model to become nonlinear.
+
+### Assumptions
+
+1. The internal `StructuredSSMCore` remains unchanged and linear.
+2. Nonlinearities are applied pointwise in time, not across the time dimension.
+3. The same block wrapper applies to both `pssidm` and `lssidm`.
+4. `pssidm` remains the raw-state reference path; `lssidm` remains the latent-encoder extension.
+5. Full-sequence training and stepwise recurrent inference must still agree numerically for the full model, even when block nonlinearities are enabled.
+
+### Configurable Nonlinear Choices
+
+Expose the following SSIDM policy-model config knobs:
+
+- `block_nonlinearity: none | silu | gelu`
+- `prenorm: false | true`
+- `dropout: float`
+
+The intended first comparison set is:
+
+1. `block_nonlinearity: none`, `prenorm: false`
+2. `block_nonlinearity: silu`, `prenorm: false`
+3. `block_nonlinearity: silu`, `prenorm: true`
+
+These correspond to:
+
+- exact stacked linear SSIDM baseline
+- nonlinear stacked SSIDM with minimal pointwise activation
+- nonlinear stacked SSIDM with the same activation plus a more literature-aligned prenorm wrapper
+
+`gelu` should also be implemented as a supported config option, but it does not need to be part of the first comparison matrix.
+
+### Block Form
+
+For hidden stream `h^{(\ell-1)}` and reference stream `r`, each block should compute:
+
+1. optional normalization:
+   - `\hat{h}^{(\ell-1)} = Norm(h^{(\ell-1)})`
+2. linear structured SSM update:
+   - `\Delta h^{(\ell)} = SSM^{(\ell)}([\hat{h}^{(\ell-1)} ; r])`
+3. optional pointwise nonlinearity:
+   - `\widetilde{\Delta h}^{(\ell)} = \phi(\Delta h^{(\ell)})`
+4. optional dropout:
+   - `\bar{\Delta h}^{(\ell)} = Dropout(\widetilde{\Delta h}^{(\ell)})`
+5. residual update:
+   - `h^{(\ell)} = h^{(\ell-1)} + \bar{\Delta h}^{(\ell)}`
+
+When `block_nonlinearity = none`, the block reduces to the exact stacked linear model. When `block_nonlinearity != none`, the overall stack becomes nonlinear, but each internal SSM remains mathematically exact.
+
+### Why This Preserves The Speed Story
+
+The per-block structured update is still a fixed linear SSM. Therefore each block still admits:
+
+- sequence-mode training through the block's convolutional/kernel form
+- recurrent rollout through the block's cached state update
+
+The nonlinear transform does break the interpretation that the entire network is one single global linear system, but it does not break the blockwise sequence-parallel execution strategy. This is the intended compromise between mathematical structure and expressiveness.
+
+### Required Validation
+
+In addition to the earlier stacked tests, the nonlinear extension must validate:
+
+1. full-stack convolution mode matches full-stack recurrent mode for:
+   - `block_nonlinearity: none`
+   - `block_nonlinearity: silu`
+   - `block_nonlinearity: gelu`
+2. eval-time repeated `forward_step` matches `forward_recurrent` for nonlinear `lssidm`
+3. invalid block-nonlinearity values fail fast
+4. comparison configs for the first three settings instantiate and train
+
+### Comparison-Ready Configs
+
+Provide smoke configs for:
+
+- `pssidm_smoke.yaml` as option 1
+- `pssidm_silu_smoke.yaml` as option 2
+- `pssidm_silu_prenorm_smoke.yaml` as option 3
+- `lssidm_smoke.yaml` as option 1
+- `lssidm_silu_smoke.yaml` as option 2
+- `lssidm_silu_prenorm_smoke.yaml` as option 3
+
+These should share all non-SSIDM settings so the comparison isolates only the nonlinear block choice.

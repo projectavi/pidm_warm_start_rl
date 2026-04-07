@@ -1,4 +1,4 @@
-experiment_name: toy_lssidm_example
+experiment_name: toy_pssidm_silu_prenorm_smoke
 
 state:
   type: states
@@ -11,7 +11,7 @@ reference_trajectory:
   inputs: four_room_human_00_inputs.json
 
 agent:
-  type: toy_lssidm
+  type: toy_pssidm
   seed: 5678
   planner_type: closest_reference
   idm_planner:
@@ -29,8 +29,8 @@ wandb:
   save_dir: ./logs
   log_model: false
   offline: true
-  train_name: toy_lssidm_example
-  eval_name: toy_lssidm_example/eval
+  train_name: toy_pssidm_silu_prenorm_smoke
+  eval_name: toy_pssidm_silu_prenorm_smoke/eval
   train_group: TestRuns
 
 pytorch_lightning:
@@ -41,7 +41,7 @@ pytorch_lightning:
     enable_checkpointing: true
     enable_progress_bar:
     enable_model_summary: true
-    max_steps: 100
+    max_steps: 10
   optimizer: adam
   optimizer_kwargs:
     lr: 0.00001
@@ -51,25 +51,19 @@ callbacks:
   checkpoint_callback_kwargs:
     save_top_k: -1
     every_n_epochs: 0
-    every_n_train_steps: 100
-    every_n_steps_custom:
-      classname: exponential
-      init_args:
-        every_n_train_steps: 50
-        increase_power: 10
-        increase_on_n_steps: 100
+    every_n_train_steps: 10
     filename: "{step}"
     verbose: false
     save_last: true
     save_on_train_epoch_end: true
-    dirpath: checkpoints/toy_lssidm_example
+    dirpath: checkpoints/toy_pssidm_silu_prenorm_smoke
 
 data:
   train_data_dir: $REPO_DIRECTORY/datasets/four_room_human_data/
-  num_train_samples: 40
-  num_validation_samples: 5
+  num_train_samples: 16
+  num_validation_samples: 4
   shuffle_trajectories: true
-  batch_size: 128
+  batch_size: 16
   num_workers: 1
   history: 7
   history_slice_specs:
@@ -84,7 +78,7 @@ data:
   alignment_strategy: causal_action_frame_alignment
 
 model:
-  algorithm: lssidm
+  algorithm: pssidm
   input_format: state_only
   submodels:
     policy_head:
@@ -99,9 +93,8 @@ model:
             delta_init: 1.0
             hippo_init: true
             diagonal_A: true
-            block_nonlinearity: none
-            prenorm: false
+            block_nonlinearity: silu
+            prenorm: true
             dropout: 0.0
-            latent_encoder_dim: 64
         action_loss:
           continuous_loss: l1

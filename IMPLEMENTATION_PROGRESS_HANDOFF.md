@@ -17,8 +17,8 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 
 - Last updated: 2026-04-07
 - Status: in_progress
-- Active request: implement the stacked structured-block SSIDM backbone, keep progress/commits current, and preserve the mathematical framework of the brief while scaling expressiveness through structured composition
-- Current objective: complete the stacked-block transition for `pssidm` and `lssidm`, validate full-stack recurrent/convolution parity and repo wiring, and then move to refreshed smoke/benchmark runs
+- Active request: add configurable nonlinear SSIDM block wrappers, keep commits/docs current, and make the first comparison set (`none`, `silu`, `silu + prenorm`) runnable for both `pssidm` and `lssidm`
+- Current objective: finish the nonlinear block comparison surface, validate sequence/recurrent parity and real train/rollout execution for the first three SSIDM options, and then move to broader comparisons
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
   - `pidm_imitation/agents/models/ssidm.py`
@@ -26,6 +26,10 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - `configs/supervised_learning/lssidm_example.yaml`
   - `configs/supervised_learning/pssidm_smoke.yaml`
   - `configs/supervised_learning/lssidm_smoke.yaml`
+  - `configs/supervised_learning/pssidm_silu_smoke.yaml`
+  - `configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml`
+  - `configs/supervised_learning/lssidm_silu_smoke.yaml`
+  - `configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml`
   - `oss_configs/templates/toy_pssidm_closest_ref.yaml`
   - `oss_configs/templates/toy_lssidm_closest_ref.yaml`
   - `oss_configs/templates/toy_pssidm_closest_ref_small.yaml`
@@ -43,6 +47,12 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - The new backbone is a residual stack of structured SSM blocks. Each block preserves the same convolutional training / recurrent inference duality as the original single-block core.
   - `pssidm` uses only a minimal per-timestep linear lift into `d_model`; `lssidm` uses a shared timestep-wise latent encoder before the same block stack.
   - The earlier interrupted projection-heavy sizing direction has been removed from tracked code.
+  - Nonlinearity is now introduced only at the block-wrapper level: the internal `StructuredSSMCore` remains linear and exact.
+  - The first comparison set is:
+    - option 1: `block_nonlinearity = none`, `prenorm = false`
+    - option 2: `block_nonlinearity = silu`, `prenorm = false`
+    - option 3: `block_nonlinearity = silu`, `prenorm = true`
+  - `gelu` is supported as a config option, but it is not part of the first comparison matrix.
 - Validation:
   - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
   - committed scaffold handoff checkpoint: `754906b` (`Update SSIDM scaffold handoff`)
@@ -50,6 +60,7 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - committed end-to-end rollout checkpoint: `739334e` (`Validate SSIDM end-to-end rollout path`)
   - committed documentation checkpoint: `1c22b33` (`Document SSIDM training and evaluation`)
   - committed stacked structured-block checkpoint: `56ce7e6` (`Stack SSIDM structured blocks`)
+  - committed nonlinear-block checkpoint: `d761da1` (`Add configurable nonlinear SSIDM blocks`)
   - stacked-core validation:
     - `python3 -m unittest tests.test_ssidm_core -v`
     - `python3 -m compileall pidm_imitation/agents/models/ssidm.py tests/test_ssidm_core.py`
@@ -77,10 +88,35 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
       - both save checkpoints that load through the real evaluation entrypoint
       - both complete one-episode toy rollouts with the stacked backbone
       - stacked smoke model summaries show the intended 3-block architecture for both variants
+  - nonlinear block validation:
+    - `python3 -m unittest tests.test_ssidm_core tests.test_ssidm_integration -v`
+    - `python3 -m compileall pidm_imitation/agents/models/ssidm.py tests/test_ssidm_core.py tests/test_ssidm_integration.py configs/supervised_learning/pssidm_example.yaml configs/supervised_learning/lssidm_example.yaml configs/supervised_learning/pssidm_smoke.yaml configs/supervised_learning/lssidm_smoke.yaml configs/supervised_learning/pssidm_silu_smoke.yaml configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml configs/supervised_learning/lssidm_silu_smoke.yaml configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml`
+    - confirmed:
+      - full-stack convolution mode matches full-stack recurrent mode for `none`, `silu`, and `gelu`
+      - eval-time repeated `forward_step` matches `forward_recurrent` for nonlinear `lssidm`
+      - invalid nonlinearity values fail fast
+      - nonlinear smoke configs instantiate through `ModelFactory`
+  - nonlinear runner-template validation:
+    - `python3 -m oss_configs.generate_configs_human --suite oss_configs/experiment_suite.yaml --config_dir toy_configs_suite_nonlinear_check`
+    - generated all 2560 configs successfully with explicit nonlinear SSIDM config fields in the suite templates
+  - nonlinear smoke-train validation:
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/pssidm_silu_smoke.yaml --new`
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml --new`
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/lssidm_silu_smoke.yaml --new`
+    - `python3 -m pidm_imitation.agents.supervised_learning.train --config configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml --new`
+    - confirmed:
+      - all four nonlinear comparison configs train through the real trainer entrypoint
+      - model summaries show the expected `StructuredSSMBlock` wrappers with `SiLU` and optional `LayerNorm`
+  - nonlinear rollout validation:
+    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/pssidm_silu_prenorm_smoke.yaml --agent toy_pssidm --checkpoint checkpoints/toy_pssidm_silu_prenorm_smoke/last.ckpt --episodes 1 --output_dir /tmp/pssidm_silu_prenorm_eval`
+    - `python3 -m pidm_imitation.toy_evaluate_model --toy_config configs/toy_env/toy_env_four_room.yaml --config configs/supervised_learning/lssidm_silu_prenorm_smoke.yaml --agent toy_lssidm --checkpoint checkpoints/toy_lssidm_silu_prenorm_smoke/last.ckpt --episodes 1 --output_dir /tmp/lssidm_silu_prenorm_eval`
+    - confirmed:
+      - nonlinear prenorm variants load from checkpoints
+      - nonlinear recurrent rollout completes for both `pssidm` and `lssidm`
 - Blockers:
   - none
 - Next step:
-  - commit the stacked smoke-validation handoff update, then move to comparison-scale experiments and any optimizer/tuning work exposed by those runs
+  - commit the nonlinear comparison configs/docs checkpoint, then run direct option-1/2/3 comparisons and tune optimizer/block settings only if those comparisons expose clear issues
 
 ## Recent Completed Work
 

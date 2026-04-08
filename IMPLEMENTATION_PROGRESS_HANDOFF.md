@@ -15,27 +15,20 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
 
 ## Current Snapshot
 
-- Last updated: 2026-04-07
+- Last updated: 2026-04-08
 - Status: in_progress
-- Active request: resize the `*_initial` SSIDM comparison configs so `lssidm` uses the same encoder as PIDM, then mirror the tuned SSM core settings into the `pssidm` variants
-- Current objective: support a PIDM-sized internal latent encoder in `lssidm`, tune the remaining SSM core budget, and validate the resulting parameter counts against `bc` / `pidm`
+- Active request: implement a way to empirically find the best `slots_per_gpu` setting for the experiment orchestrator
+- Current objective: add a calibration mode that sweeps `slots_per_gpu` over a representative plan subset and reports throughput summaries
 - Files in progress:
   - `IMPLEMENTATION_PROGRESS_HANDOFF.md`
-  - `pidm_imitation/agents/models/ssidm.py`
-  - `configs/supervised_learning/pssidm_initial.yaml`
-  - `configs/supervised_learning/pssidm_silu_initial.yaml`
-  - `configs/supervised_learning/pssidm_silu_prenorm_initial.yaml`
-  - `configs/supervised_learning/lssidm_initial.yaml`
-  - `configs/supervised_learning/lssidm_silu_initial.yaml`
-  - `configs/supervised_learning/lssidm_silu_prenorm_initial.yaml`
+  - `experiments/orchestrator.py`
+  - `experiments/README.md`
 - Decisions:
-  - `lssidm` now supports reusing the same encoder family as PIDM by accepting an internal `latent_encoder_network_config`, implemented with the repo's existing `NetworkBlock`.
-  - The PIDM-matched `lssidm` encoder uses the same `14 -> 512 -> 1024 -> 256 -> batch_norm` stack as the PIDM state encoder.
-  - To keep the total `lssidm` size near PIDM, the encoder output is shared-projected into an SSM width of `d_model = 64`, and the remaining budget is assigned to a `3`-layer SSM core with `ssm_state_dim = 157`.
-  - The `pssidm` initial variants copy that tuned SSM core structure exactly:
-    - `d_model = 64`
-    - `num_ssm_layers = 3`
-    - `ssm_state_dim = 157`
+  - Slot calibration is implemented as an orchestrator mode rather than a separate script, so it reuses the existing plan, filtering, and GPU-slot model.
+  - Calibration mode is train-only by design: it disables eval, disables WandB for launched subprocesses, forces fresh temporary checkpoints, and overrides `trainer.max_steps` in generated temp configs.
+  - Calibration temp configs are written under `outputs/orchestrator/<timestamp>/slot_calibration/slots_<n>/repeat_<k>/configs/`.
+  - The primary metric is `steps_per_second`, with `runs_per_hour` and failure counts also recorded.
+  - Candidate selection should still be done on a representative subset of configs; there is no single static best `slots_per_gpu` value for all model mixes.
 - Validation:
   - committed scaffold checkpoint: `ba1466c` (`Add initial pssidm lssidm scaffold`)
   - committed scaffold handoff checkpoint: `754906b` (`Update SSIDM scaffold handoff`)
@@ -111,22 +104,24 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
       - direct-config baseline entries now use `configs/supervised_learning/bc_smoke.yaml` and `configs/supervised_learning/pidm_smoke.yaml`
       - `bc` and `pidm` direct-config runs now resolve to unique checkpoint directories (`checkpoints/toy_bc_smoke` and `checkpoints/toy_pidm_smoke`)
       - the direct comparison job is safe to run in parallel across its config entries
-  - SSIDM initial-size retune validation:
-    - `python3 -m compileall pidm_imitation/agents/models/ssidm.py configs/supervised_learning/pssidm_initial.yaml configs/supervised_learning/pssidm_silu_initial.yaml configs/supervised_learning/pssidm_silu_prenorm_initial.yaml configs/supervised_learning/lssidm_initial.yaml configs/supervised_learning/lssidm_silu_initial.yaml configs/supervised_learning/lssidm_silu_prenorm_initial.yaml`
-    - exact parameter-count check via config -> datamodule -> `ModelFactory.get_model(...)`
-    - confirmed totals:
-      - `bc_initial`: `862210`
-      - `pidm_initial`: `928002`
-      - `pssidm_initial`: `117532`
-      - `pssidm_silu_initial`: `117532`
-      - `pssidm_silu_prenorm_initial`: `117916`
-      - `lssidm_initial`: `927964`
-      - `lssidm_silu_initial`: `927964`
-      - `lssidm_silu_prenorm_initial`: `928348`
+  - slots-per-GPU calibration validation:
+    - `python3 -m compileall experiments/orchestrator.py`
+    - dry run:
+      - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --calibrate_slots --slot_candidates 1 2 --calibration_steps 5 --calibration_repeats 1 --only_job nonlinear-all-test --match pssidm --dry_run`
+    - tiny real run:
+      - `python3 experiments/orchestrator.py --plan experiments/plans/ssidm_compare.yaml --calibrate_slots --slot_candidates 1 --calibration_steps 1 --calibration_repeats 1 --only_job nonlinear-all-test --match pssidm/linear`
+    - confirmed:
+      - calibration mode generates temporary train-only configs with unique checkpoint dirs
+      - the calibration trial completes through the real training entrypoint
+      - summary artifacts are written:
+        - `slot_calibration/trials.json`
+        - `slot_calibration/trials.csv`
+        - `slot_calibration/summary.json`
+        - `slot_calibration/summary.csv`
 - Blockers:
   - none
 - Next step:
-  - if requested, update the experiment plan(s) to point at the resized `*_initial` configs rather than the smoke configs
+  - if requested, add calibration defaults or candidate sweeps to a dedicated benchmarking plan without touching the user's current local plan edits
 
 ## Recent Completed Work
 
@@ -155,6 +150,11 @@ This file is the repo-local working memory for implementation tasks. Keep it cur
   - `lssidm` now uses a PIDM-matched internal encoder stack through `latent_encoder_network_config`
   - `lssidm` total params are now essentially matched to PIDM (`~928k`)
   - `pssidm` copies the same tuned SSM core structure while remaining encoder-free
+- Added `--calibrate_slots` mode to `experiments/orchestrator.py`:
+  - sweeps candidate `slots_per_gpu` values
+  - materializes temporary configs with overridden `max_steps`
+  - runs train-only throughput trials
+  - writes grouped throughput summaries under `outputs/orchestrator/.../slot_calibration/`
 
 ### 2026-04-06
 

@@ -139,6 +139,59 @@ Outputs for each orchestration run go under `outputs/orchestrator/<timestamp>/` 
 
 Use the orchestrator when you want to design a batch once and re-run the same plan later without reconstructing CLI filters by hand. Use `runner.py` when you want the existing single-command “generate the suite and run it” path.
 
+### Calibrating `slots_per_gpu`
+
+The orchestrator can now benchmark `slots_per_gpu` empirically instead of guessing. Calibration mode:
+
+- expands the selected runs from your plan
+- creates temporary train-only configs under `outputs/orchestrator/.../slot_calibration/...`
+- overrides `trainer.max_steps` for a short benchmark
+- gives every calibration run its own temporary checkpoint directory
+- disables WandB for the benchmark subprocesses
+- reports aggregate throughput by `slots_per_gpu`
+
+Example dry run:
+
+```bash
+python experiments/orchestrator.py \
+  --plan experiments/plans/ssidm_compare.yaml \
+  --calibrate_slots \
+  --slot_candidates 1 2 3 \
+  --calibration_steps 500 \
+  --calibration_repeats 2 \
+  --only_job nonlinear-all-test \
+  --match pssidm \
+  --dry_run
+```
+
+Run a real calibration sweep:
+
+```bash
+python experiments/orchestrator.py \
+  --plan experiments/plans/ssidm_compare.yaml \
+  --calibrate_slots \
+  --slot_candidates 1 2 3 \
+  --calibration_steps 500 \
+  --calibration_repeats 2 \
+  --only_job nonlinear-all-test
+```
+
+Useful guidance:
+
+- calibrate on a representative subset, not the full paper sweep
+- measure `train` only first; eval and WandB add noise
+- use enough steps that startup overhead is not dominant
+- repeat each candidate at least twice
+
+Calibration outputs are written under `outputs/orchestrator/<timestamp>/slot_calibration/`:
+
+- `trials.json` and `trials.csv`: one row per `(slots_per_gpu, repeat)` trial
+- `summary.json` and `summary.csv`: mean throughput grouped by `slots_per_gpu`
+- `slots_<n>/repeat_<k>/configs/*.yaml`: generated temporary configs
+- `slots_<n>/repeat_<k>/logs/*.train.log`: training logs for each calibration run
+
+The main throughput metric is `mean_steps_per_second`. The orchestrator also reports `mean_runs_per_hour` and prefers zero-failure candidates when choosing the best result.
+
 ## Adding a New Method
 
 To compare a new method against PIDM and BC under the same seeds, sample counts, and environments:

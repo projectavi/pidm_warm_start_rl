@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import subprocess
 import shutil
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TextIO
+
+import yaml
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -66,6 +69,30 @@ def parse_args() -> argparse.Namespace:
         "--dry_run",
         action="store_true",
         help="Print the resolved runs and scheduler slots without launching anything.",
+    )
+    parser.add_argument(
+        "--calibrate_slots",
+        action="store_true",
+        help="Run a train-only throughput sweep over slots_per_gpu candidates using temporary overridden configs.",
+    )
+    parser.add_argument(
+        "--slot_candidates",
+        type=int,
+        nargs="+",
+        default=None,
+        help="slots_per_gpu values to benchmark during calibration. Defaults to plan defaults or 1 2 3 4.",
+    )
+    parser.add_argument(
+        "--calibration_steps",
+        type=int,
+        default=None,
+        help="Temporary trainer.max_steps to use for each calibration run. Defaults to plan defaults or 500.",
+    )
+    parser.add_argument(
+        "--calibration_repeats",
+        type=int,
+        default=None,
+        help="Number of repeats to run per slots_per_gpu candidate. Defaults to plan defaults or 2.",
     )
     return parser.parse_args()
 
@@ -246,6 +273,19 @@ class ActiveProcess:
     log_path: Path
 
 
+@dataclass
+class CalibrationTrial:
+    slots_per_gpu: int
+    repeat: int
+    duration_seconds: float
+    successful_runs: int
+    failed_runs: int
+    successful_steps: int
+    steps_per_second: float
+    runs_per_hour: float
+    output_root: Path
+
+
 def build_config_run_specs(
     repo_root: Path,
     job_name: str,
@@ -424,6 +464,10 @@ def build_run_specs(
     return all_specs, defaults
 
 
+def sanitize_name(value: str) -> str:
+    return value.replace("/", "__").replace(" ", "_")
+
+
 def filter_run_specs(
     specs: list[RunSpec], only_job: list[str], match_filters: list[str]
 ) -> list[RunSpec]:
@@ -468,6 +512,81 @@ def resolve_existing_checkpoint(spec: RunSpec) -> Path | None:
         if checkpoint is not None:
             return checkpoint
     return find_checkpoint_in_dir(spec.checkpoint_dir)
+
+
+def apply_calibration_overrides(
+    config_data: dict[str, Any],
+    run_name: str,
+    checkpoint_dir: Path,
+    calibration_steps: int,
+) -> dict[str, Any]:
+    updated = json.loads(json.dumps(config_data))
+    updated["experiment_name"] = run_name
+
+    trainer_config = updated.setdefault("pytorch_lightning", {}).setdefault("trainer", {})
+    trainer_config["max_steps"] = calibration_steps
+
+    callbacks_config = updated.setdefault("callbacks", {})
+    checkpoint_kwargs = callbacks_config.setdefault("checkpoint_callback_kwargs", {})
+    checkpoint_kwargs["dirpath"] = str(checkpoint_dir)
+    checkpoint_kwargs["every_n_train_steps"] = calibration_steps
+    checkpoint_kwargs["every_n_epochs"] = 0
+    checkpoint_kwargs["save_last"] = True
+    checkpoint_kwargs.pop("every_n_steps_custom", None)
+
+    wandb_config = updated.get("wandb")
+    if isinstance(wandb_config, dict):
+        wandb_config["offline"] = True
+        wandb_config["train_name"] = run_name
+        wandb_config["eval_name"] = f"{run_name}/eval"
+        wandb_config["train_group"] = "slot_calibration"
+        wandb_config["eval_group"] = "slot_calibration"
+
+    return updated
+
+
+def build_calibration_specs(
+    specs: list[RunSpec],
+    trial_root: Path,
+    slots_per_gpu: int,
+    repeat: int,
+    calibration_steps: int,
+) -> list[RunSpec]:
+    calibration_specs: list[RunSpec] = []
+    config_dir = trial_root / "configs"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    for spec in specs:
+        config_data = load_yaml(spec.config_path.resolve())
+        run_slug = sanitize_name(spec.name)
+        calibration_name = f"{run_slug}__slots{slots_per_gpu}__repeat{repeat}"
+        checkpoint_dir = trial_root / "checkpoints" / run_slug
+        results_dir = trial_root / "results" / run_slug
+        calibration_config_path = config_dir / f"{run_slug}.yaml"
+        overridden = apply_calibration_overrides(
+            config_data=config_data,
+            run_name=calibration_name,
+            checkpoint_dir=checkpoint_dir,
+            calibration_steps=calibration_steps,
+        )
+        calibration_config_path.write_text(
+            yaml.safe_dump(overridden, sort_keys=False),
+            encoding="utf-8",
+        )
+        calibration_specs.append(
+            replace(
+                spec,
+                config_path=calibration_config_path,
+                checkpoint_dir=checkpoint_dir,
+                results_dir=results_dir,
+                phases=("train",),
+                enable_wandb=False,
+                force_train=True,
+                force_eval=False,
+                save_results=False,
+            )
+        )
+    return calibration_specs
 
 
 def build_training_command(spec: RunSpec) -> list[str]:
@@ -705,6 +824,27 @@ def print_run_plan(specs: list[RunSpec], slots: list[GpuSlot]) -> None:
         )
 
 
+def print_calibration_plan(
+    specs: list[RunSpec],
+    gpu_ids: list[int],
+    slot_candidates: list[int],
+    calibration_steps: int,
+    calibration_repeats: int,
+) -> None:
+    print(f"Calibration base runs: {len(specs)}", flush=True)
+    print(f"Calibration GPUs: {', '.join(str(gpu_id) for gpu_id in gpu_ids)}", flush=True)
+    print(
+        f"Calibration slots_per_gpu candidates: {', '.join(str(candidate) for candidate in slot_candidates)}",
+        flush=True,
+    )
+    print(
+        f"Calibration steps per run: {calibration_steps}; repeats per candidate: {calibration_repeats}",
+        flush=True,
+    )
+    for spec in specs:
+        print(f" - {spec.name}: config={spec.config_path}", flush=True)
+
+
 def write_run_plan(
     output_root: Path,
     plan_path: Path,
@@ -746,7 +886,11 @@ def write_run_plan(
 
 def build_slots(defaults: dict[str, Any]) -> list[GpuSlot]:
     gpu_ids = [int(value) for value in as_list(defaults.get("gpus", [0]))]
-    slots_per_gpu = int(defaults.get("slots_per_gpu", 1))
+    return build_slots_for_gpu_ids(gpu_ids, int(defaults.get("slots_per_gpu", 1)))
+
+
+def build_slots_for_gpu_ids(gpu_ids: list[int], slots_per_gpu: int) -> list[GpuSlot]:
+    slots_per_gpu = int(slots_per_gpu)
     if slots_per_gpu <= 0:
         raise ValueError("slots_per_gpu must be positive.")
     if not gpu_ids:
@@ -756,6 +900,184 @@ def build_slots(defaults: dict[str, Any]) -> list[GpuSlot]:
         for gpu_id in gpu_ids
         for slot_id in range(slots_per_gpu)
     ]
+
+
+def build_slot_candidates(
+    args: argparse.Namespace, defaults: dict[str, Any]
+) -> list[int]:
+    raw_candidates = args.slot_candidates
+    if raw_candidates is None:
+        raw_candidates = as_list(defaults.get("slot_candidates", [1, 2, 3, 4]))
+    candidates = sorted({int(value) for value in raw_candidates})
+    if not candidates or any(candidate <= 0 for candidate in candidates):
+        raise ValueError("slot_candidates must contain positive integers.")
+    return candidates
+
+
+def write_calibration_summary(
+    output_root: Path,
+    trials: list[CalibrationTrial],
+) -> None:
+    calibration_root = output_root / "slot_calibration"
+    calibration_root.mkdir(parents=True, exist_ok=True)
+    trial_rows = [
+        {
+            "slots_per_gpu": trial.slots_per_gpu,
+            "repeat": trial.repeat,
+            "duration_seconds": trial.duration_seconds,
+            "successful_runs": trial.successful_runs,
+            "failed_runs": trial.failed_runs,
+            "successful_steps": trial.successful_steps,
+            "steps_per_second": trial.steps_per_second,
+            "runs_per_hour": trial.runs_per_hour,
+            "output_root": str(trial.output_root),
+        }
+        for trial in trials
+    ]
+    (calibration_root / "trials.json").write_text(
+        json.dumps(trial_rows, indent=2),
+        encoding="utf-8",
+    )
+    with (calibration_root / "trials.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(trial_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(trial_rows)
+
+    aggregates: dict[int, dict[str, float]] = {}
+    for slots_per_gpu in sorted({trial.slots_per_gpu for trial in trials}):
+        slot_trials = [trial for trial in trials if trial.slots_per_gpu == slots_per_gpu]
+        count = len(slot_trials)
+        aggregates[slots_per_gpu] = {
+            "slots_per_gpu": float(slots_per_gpu),
+            "num_trials": float(count),
+            "mean_duration_seconds": sum(t.duration_seconds for t in slot_trials) / count,
+            "mean_successful_runs": sum(t.successful_runs for t in slot_trials) / count,
+            "mean_failed_runs": sum(t.failed_runs for t in slot_trials) / count,
+            "mean_successful_steps": sum(t.successful_steps for t in slot_trials) / count,
+            "mean_steps_per_second": sum(t.steps_per_second for t in slot_trials) / count,
+            "mean_runs_per_hour": sum(t.runs_per_hour for t in slot_trials) / count,
+        }
+
+    aggregate_rows = [aggregates[key] for key in sorted(aggregates)]
+    (calibration_root / "summary.json").write_text(
+        json.dumps(aggregate_rows, indent=2),
+        encoding="utf-8",
+    )
+    with (calibration_root / "summary.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(aggregate_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(aggregate_rows)
+
+
+def run_slot_calibration(
+    specs: list[RunSpec],
+    defaults: dict[str, Any],
+    args: argparse.Namespace,
+    output_root: Path,
+) -> int:
+    gpu_ids = [int(value) for value in as_list(defaults.get("gpus", [0]))]
+    slot_candidates = build_slot_candidates(args, defaults)
+    calibration_steps = int(
+        args.calibration_steps
+        if args.calibration_steps is not None
+        else defaults.get("calibration_steps", 500)
+    )
+    calibration_repeats = int(
+        args.calibration_repeats
+        if args.calibration_repeats is not None
+        else defaults.get("calibration_repeats", 2)
+    )
+    if calibration_steps <= 0:
+        raise ValueError("calibration_steps must be positive.")
+    if calibration_repeats <= 0:
+        raise ValueError("calibration_repeats must be positive.")
+
+    print_calibration_plan(
+        specs=specs,
+        gpu_ids=gpu_ids,
+        slot_candidates=slot_candidates,
+        calibration_steps=calibration_steps,
+        calibration_repeats=calibration_repeats,
+    )
+    if args.dry_run:
+        log_progress("Dry run requested; no calibration trials launched.")
+        return 0
+
+    trials: list[CalibrationTrial] = []
+    for slots_per_gpu in slot_candidates:
+        for repeat in range(1, calibration_repeats + 1):
+            trial_root = (
+                output_root
+                / "slot_calibration"
+                / f"slots_{slots_per_gpu}"
+                / f"repeat_{repeat}"
+            )
+            trial_specs = build_calibration_specs(
+                specs=specs,
+                trial_root=trial_root,
+                slots_per_gpu=slots_per_gpu,
+                repeat=repeat,
+                calibration_steps=calibration_steps,
+            )
+            run_states = [create_run_state(spec) for spec in trial_specs]
+            slots = build_slots_for_gpu_ids(gpu_ids, slots_per_gpu)
+            log_progress(
+                f"Calibration trial start: slots_per_gpu={slots_per_gpu} repeat={repeat} "
+                f"runs={len(trial_specs)} steps_per_run={calibration_steps}"
+            )
+            start_time = time.perf_counter()
+            failures = schedule_runs(
+                run_states=run_states,
+                slots=slots,
+                logs_dir=trial_root / "logs",
+                poll_interval=float(defaults.get("poll_interval", 1.0)),
+            )
+            duration_seconds = time.perf_counter() - start_time
+            successful_runs = sum(
+                1
+                for state in run_states
+                if not state.failed and "train" in state.completed_phases
+            )
+            successful_steps = successful_runs * calibration_steps
+            steps_per_second = (
+                successful_steps / duration_seconds if duration_seconds > 0 else 0.0
+            )
+            runs_per_hour = (
+                successful_runs * 3600.0 / duration_seconds
+                if duration_seconds > 0
+                else 0.0
+            )
+            trial = CalibrationTrial(
+                slots_per_gpu=slots_per_gpu,
+                repeat=repeat,
+                duration_seconds=duration_seconds,
+                successful_runs=successful_runs,
+                failed_runs=failures,
+                successful_steps=successful_steps,
+                steps_per_second=steps_per_second,
+                runs_per_hour=runs_per_hour,
+                output_root=trial_root,
+            )
+            trials.append(trial)
+            log_progress(
+                f"Calibration trial done: slots_per_gpu={slots_per_gpu} repeat={repeat} "
+                f"steps_per_second={steps_per_second:.2f} runs_per_hour={runs_per_hour:.2f} "
+                f"successful_runs={successful_runs}/{len(run_states)}"
+            )
+
+    write_calibration_summary(output_root=output_root, trials=trials)
+    valid_trials = [trial for trial in trials if trial.failed_runs == 0]
+    ranked_trials = valid_trials if valid_trials else trials
+    best_trial = max(ranked_trials, key=lambda trial: trial.steps_per_second)
+    log_progress(
+        f"Best calibration result: slots_per_gpu={best_trial.slots_per_gpu} "
+        f"steps_per_second={best_trial.steps_per_second:.2f} "
+        f"runs_per_hour={best_trial.runs_per_hour:.2f} "
+        f"failures={best_trial.failed_runs}"
+    )
+    return 0 if all(trial.failed_runs == 0 for trial in trials) else 1
 
 
 def build_output_root(defaults: dict[str, Any], repo_root: Path) -> Path:
@@ -781,9 +1103,6 @@ def main() -> int:
     logs_dir = output_root / "logs"
 
     print_run_plan(specs, slots)
-    if args.dry_run:
-        log_progress("Dry run requested; no processes launched.")
-        return 0
 
     write_run_plan(
         output_root=output_root,
@@ -792,6 +1111,17 @@ def main() -> int:
         specs=specs,
         slots=slots,
     )
+    if args.calibrate_slots:
+        return run_slot_calibration(
+            specs=specs,
+            defaults=defaults,
+            args=args,
+            output_root=output_root,
+        )
+    if args.dry_run:
+        log_progress("Dry run requested; no processes launched.")
+        return 0
+
     run_states = [create_run_state(spec) for spec in specs]
 
     failures = schedule_runs(
